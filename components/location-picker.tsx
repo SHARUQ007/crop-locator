@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   MapPin,
   ChevronDown,
@@ -52,10 +52,29 @@ export default function LocationPicker({
       document.removeEventListener("keydown", esc);
     };
   }, [open]);
+  const [position, setPosition] = useState({ top: 0, left: 0, width: 390, maxHeight: 500 });
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const rect = root.current?.querySelector(".location-picker-trigger")?.getBoundingClientRect();
+      if (!rect) return;
+      const width = Math.min(390, window.innerWidth - 24);
+      const below = window.innerHeight - rect.bottom - 20;
+      const above = rect.top - 20;
+      const useBelow = below >= 300 || below >= above;
+      const maxHeight = Math.max(120, Math.min(580, useBelow ? below : above));
+      setPosition({ top: useBelow ? rect.bottom + 8 : Math.max(12, rect.top - maxHeight - 8), left: Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)), width, maxHeight });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); };
+  }, [open]);
   const choose = (v: string) => {
     onChange(v);
     setOpen(false);
     setQuery("");
+    root.current?.querySelector<HTMLButtonElement>(".location-picker-trigger")?.focus();
   };
   const regionMatches = [...new Set(db.locations.map((s) => s.region))].filter(
     (r) => matchesSearch(r, query),
@@ -90,8 +109,19 @@ export default function LocationPicker({
       {open && (
         <div
           className="location-picker-menu popover"
+          style={{ position: "fixed", ...position, overflowY: "auto" }}
           role="dialog"
           aria-label="Choose search location"
+          onKeyDown={(event) => {
+            const buttons = Array.from(root.current?.querySelectorAll<HTMLButtonElement>(".picker-options button, .picker-nearby, .picker-world") || []);
+            const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              const next = index < 0 ? (event.key === "ArrowDown" ? 0 : buttons.length - 1) : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+              buttons[next]?.focus(); buttons[next]?.scrollIntoView({block:"nearest"});
+            }
+            if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setOpen(false); root.current?.querySelector<HTMLButtonElement>(".location-picker-trigger")?.focus(); }
+          }}
         >
           <div className="location-picker-heading">
             <strong>{sampleOnly ? "Find your sample location" : "Where would you like to explore?"}</strong>

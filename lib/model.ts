@@ -34,6 +34,7 @@ export type Project = {
   sites: string[];
   candidates?: Candidate[];
   owner: string;
+  checklist?: string[];
   updated: string;
   scenarios: {
     id: string;

@@ -1,5 +1,10 @@
 "use client";
-import { useState } from "react";
+import TabInsight from "./tab-insight";
+import CropHealth from "./crop-health";
+import CropResults from "./crop-results";
+import SearchSelect from "./search-select";
+import { ResearchIntelligence, SoilDistributions } from "./research-intelligence";
+import { useState, useId } from "react";
 import {
   X,
   Bookmark,
@@ -18,7 +23,10 @@ import {
   Maximize2,
   ArrowUpRight,
   FlaskConical,
+  RotateCcw,
 } from "lucide-react";
+import { SearchField } from "./workspace-ui";
+import { matchesSearch } from "../lib/search";
 import { practiceGuides } from "../lib/growing-practices";
 import {
   ResponsiveContainer,
@@ -106,7 +114,10 @@ export default function LocationDetail({
         : 0,
     ),
     [logistics, setLogistics] = useState(initialAssumptions?.logistics ?? 6500),
-    [showAll, setShowAll] = useState(false);
+    [showAll, setShowAll] = useState(false),
+    [cropSearch, setCropSearch] = useState(""),
+    [opportunitySort, setOpportunitySort] = useState("fit");
+  const tabId = useId();
   const o = { ...getRecord(site.id, context), ...(cellObservation || {}) },
     crop = getCrop(context.crop),
     aez = db.aezs.find((a) => a.id === site.aezId)!;
@@ -169,8 +180,21 @@ export default function LocationDetail({
   const relevant = evidence.filter(
     (e) => e.locationId === site.id && e.cropId === context.crop,
   );
+  const opportunities=db.crops.map(item=>({name:item.name,score:getRecord(site.id,context,item.id).suitability})).sort((a,b)=>b.score-a.score);
+  const exposure=(value:number)=>value>=60?'high':value>=30?'moderate':'low';
+  const insight:Record<string,string>={
+    Overview:`${crop.name} screens as ${fitLabel(o.suitability).toLowerCase()} here, with ${exposure(o.droughtRisk)} drought exposure. ${relevant.length?'Use the attached evidence to validate local performance.':'Local field evidence is the next gap to close.'}`,
+    'Crop intelligence':`${opportunities[0].name} leads this location’s species screening at ${opportunities[0].score.toFixed(0)}/100. Compare water needs and crop-product economics before shortlisting alternatives.`,
+    'Decision tools':`The current model yields ${o.yieldRange.join('–')} t/ha for ${crop.name.toLowerCase()}. Test future exposure, supply volumes or transition costs against your decision.`,
+    'Growing context':`The sample growing window is ${site.growingWindow}. Align variety, planting and harvest plans with local practices before using this window operationally.`,
+    Climate:`The selected context has ${exposure(o.droughtRisk)} drought and ${exposure(o.heatRisk)} heat exposure. Annual averages of ${Math.round(o.annualRainfallMm)} mm rainfall and ${o.meanTemperatureC.toFixed(1)} °C can hide seasonal extremes.`,
+    Soil:`Sample mean pH is ${soil.ph.toFixed(1)}, with ${soil.clay.toFixed(0)}% clay and ${soil.organicCarbon.toFixed(2)}% organic carbon. Check variation across cells and validate with a recent soil test.`,
+    'Pests & diseases':`Use the crop-specific watchlist to plan scouting. Local pest presence and disease incidence have not been assessed for ${site.name}.`,
+    Economics:`At the current price and cost assumptions, gross margin is ${money(margin)}/ha. ${margin<0?'The scenario is below operating break-even.':'Test downside prices and yield before committing capital.'}`,
+    Evidence:`${relevant.length} team ${relevant.length===1?'record is':'records are'} attached for this crop and location. ${relevant.some(item=>item.yield!==undefined)?'Measured yields are available to benchmark the model.':'Measured yield evidence is still needed to benchmark field performance.'}`,
+  };
   return (
-    <aside className="detail-panel">
+    <aside className="detail-panel intelligence-panel">
       <div className="detail-top">
         <span className="eyebrow">LOCATION INTELLIGENCE</span>
         <a className="text-button back-to-map" href="#explore-map">
@@ -197,7 +221,7 @@ export default function LocationDetail({
         </div>
         <button
           className="icon-button bordered"
-          title="Inspect 1 km cells"
+          title="Locate this sample area on the map"
           onClick={onZoom}
         >
           <Maximize2 size={16} />
@@ -212,156 +236,83 @@ export default function LocationDetail({
         </div>
       )}
       <div className="detail-context">
-        {crop.name}
+        <label className="intelligence-crop-context"><span>Analysing</span><SearchSelect aria-label="Intelligence crop" value={context.crop} onChange={event=>onContext({...context,crop:event.target.value})}>{db.crops.map(c=><option value={c.id} key={c.id}>{c.name}</option>)}</SearchSelect></label>
         <span>·</span>
         {context.season}
         <span>·</span>
         {db.periods.find((p) => p.id === context.period)?.range}
       </div>
-      {cropOpportunities && (
-        <section className="crop-opportunities" aria-label="Crop opportunities">
-          <div className="opportunity-heading"><div><h3>Crop opportunities</h3><p>All {db.crops.length} screened crops for {site.name}. Select a crop to inspect its details.</p></div><span>Synthetic screening</span></div>
-          <div className="opportunity-grid">
-            {db.crops.map((candidate) => ({ crop: candidate, record: getRecord(site.id, context, candidate.id) }))
-              .sort((a, b) => b.record.suitability - a.record.suitability)
-              .map(({ crop: candidate, record }) => (
-                <article key={candidate.id} className={"opportunity-card " + (context.crop === candidate.id ? "active" : "")}>
-                  <button className="opportunity-select" onClick={() => onContext({ ...context, crop: candidate.id })} aria-pressed={context.crop === candidate.id}>
-                    <strong>{candidate.name}<span>{Math.round(record.suitability)}<small>/100</small></span></strong>
-                    <span>{fitLabel(record.suitability)}</span>
-                    <small>Yield range {record.yieldRange.join("–")} t/ha</small>
-                  </button>
-                  <button className="text-button" onClick={() => onCompareCrop?.(candidate.id)} aria-pressed={comparedCrops.includes(candidate.id)}>
-                    {comparedCrops.includes(candidate.id) ? <Check size={14} /> : <Plus size={14} />} {comparedCrops.includes(candidate.id) ? "Added to comparison" : "Compare crop"}
-                  </button>
-                </article>
-              ))}
-          </div>
-        </section>
-      )}
-      <div className="detail-tabs">
+      <div className="intelligence-layout">
+      <div className="detail-tabs intelligence-nav" role="tablist" aria-orientation="vertical" aria-label="Location intelligence sections">
         {[
           "Overview",
+          "Crop intelligence",
+          "Decision tools",
           "Growing context",
           "Climate",
           "Soil",
+          "Pests & diseases",
           "Economics",
           "Evidence",
         ].map((t) => (
           <button
             key={t}
+            role="tab"
+            id={`${tabId}-${t.replaceAll(" ","-")}`}
+            aria-selected={tab === t}
+            aria-controls={`${tabId}-panel`}
+            tabIndex={tab === t ? 0 : -1}
+            onKeyDown={(event) => {
+              const tabs = Array.from(event.currentTarget.parentElement!.querySelectorAll<HTMLButtonElement>("[role='tab']"));
+              let index = tabs.indexOf(event.currentTarget);
+              if (event.key === "ArrowRight" || event.key === "ArrowDown") index = (index + 1) % tabs.length;
+              else if (event.key === "ArrowLeft" || event.key === "ArrowUp") index = (index - 1 + tabs.length) % tabs.length;
+              else if (event.key === "Home") index = 0;
+              else if (event.key === "End") index = tabs.length - 1;
+              else return;
+              event.preventDefault(); tabs[index].click(); tabs[index].focus();
+            }}
             className={tab === t ? "active" : ""}
             onClick={() => setTab(t)}
           >
-            {t}
+            <span className="intelligence-nav-label">{t}<small>{{Overview:"Decision summary", "Crop intelligence":"Rank & shortlist crops", "Decision tools":"Supply, resilience & trials", "Growing context":"Origins & growing practices", Climate:"Seasonality & exposure", Soil:"Conditions & variation", "Pests & diseases":"Scouting & field evidence", Economics:"Test price & cost assumptions", Evidence:"Records & methodology"}[t]}</small></span>
             {t === "Evidence" && relevant.length > 0 && (
               <i>{relevant.length}</i>
             )}
           </button>
         ))}
       </div>
-      <div className="detail-body" data-tab={tab} key={site.id + tab}>
+      <div className="detail-body" data-tab={tab} key={site.id + tab} role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-${tab.replaceAll(" ","-")}`}>
+      {tab === "Crop intelligence" && (
+        <section className="crop-opportunities" aria-label="Crop opportunities">
+          <div className="opportunity-heading"><div><h3>Crop opportunities</h3><TabInsight>{insight["Crop intelligence"]}</TabInsight></div><span>Synthetic screening</span></div>
+          <div className="crop-screening-requirements"><div><span>Selected crop</span><strong>{crop.name}</strong><small>{crop.scientificName}</small></div><div><span>Temperature range</span><strong>{crop.temperature.join("–")} °C</strong><small>Species screening envelope</small></div><div><span>Annual rainfall</span><strong>{crop.rainfall.join("–")} mm</strong><small>Screen against water availability</small></div><div><span>Soil pH range</span><strong>{crop.ph.join("–")}</strong><small>Confirm with a field test</small></div></div>
+          <div className="opportunity-toolbar"><SearchField label="Search crop opportunities" value={cropSearch} onChange={setCropSearch} placeholder="Search all screened crops…" /><label>Sort by<SearchSelect aria-label="Sort crop opportunities" value={opportunitySort} onChange={(e) => setOpportunitySort(e.target.value)}><option value="fit">Environmental fit</option><option value="margin">Illustrative margin / ha</option><option value="water">Lowest drought risk</option></SearchSelect></label></div>
+          <div className="crop-candidate-grid"><CropResults site={site} context={context} evidence={evidence} compared={comparedCrops}
+            items={db.crops.map(candidate=>({crop:candidate,record:getRecord(site.id,context,candidate.id)})).filter(({crop})=>matchesSearch(crop.name+" "+crop.category,cropSearch)).sort((a,b)=>opportunitySort==="water"?a.record.droughtRisk-b.record.droughtRisk:opportunitySort==="margin"?(b.record.yieldTHa*b.record.priceINRTonne-b.record.inputCostINRHa)-(a.record.yieldTHa*a.record.priceINRTonne-a.record.inputCostINRHa):b.record.suitability-a.record.suitability)}
+            onSelect={cropId=>onContext({...context,crop:cropId})} onView={cropId=>{onContext({...context,crop:cropId});setTab("Overview");}} onCompare={cropId=>onCompareCrop?.(cropId)} /></div>
+          {!db.crops.some((crop) => matchesSearch(crop.name + " " + crop.category, cropSearch)) && <div className="search-empty"><h3>No crops match “{cropSearch}”</h3><button className="button secondary" onClick={() => setCropSearch("")}>Clear search</button></div>}
+        </section>
+      )}
+        {tab === "Pests & diseases" && <CropHealth summary={insight["Pests & diseases"]} site={site} context={context} evidence={evidence} onEvidence={onEvidence}/> }
+        {tab === "Decision tools" && <ResearchIntelligence site={site} context={context} onContext={onContext} evidence={evidence} onEvidence={onEvidence} onScenario={() => onScenario()} onAnalogues={onAnalogues} />}
         {tab === "Overview" && (
-          <>
-            <div className="fit-summary">
-              <div
-                className="fit-ring"
-                style={{ "--fit": o.suitability + "%" } as React.CSSProperties}
-              >
-                <strong>
-                  {Math.round(o.suitability)}
-                  <small>/100</small>
-                </strong>
-              </div>
-              <div>
-                <span className="pill green">{fitLabel(o.suitability)}</span>
-                <h3>
-                  {o.suitability >= 85
-                    ? "A strong environmental match."
-                    : o.suitability >= 70
-                      ? "A promising growing environment."
-                      : "Constraints need a closer look."}
-                </h3>
-                <p>
-                  Species-level screening for {crop.name.toLowerCase()}. Confirm
-                  locally before investing.
-                </p>
-              </div>
+          <section className="intelligence-overview">
+            <div className="analysis-section-heading"><span className="eyebrow">THE DECISION AT A GLANCE</span><h3>How does {crop.name.toLowerCase()} fit here?</h3><TabInsight>{insight.Overview}</TabInsight></div>
+            <div className="overview-kpis">
+              <article className="overview-score"><span>Environmental fit</span><strong>{Math.round(o.suitability)}<small>/100</small></strong><div className="overview-score-track"><i style={{width:o.suitability+"%"}} /></div><small>{fitLabel(o.suitability)}</small></article>
+              <article><span>Potential yield</span><strong>{o.yieldRange.join("–")}<small> t/ha</small></strong><small>Illustrative range, not a forecast</small></article>
+              <article><span>Drought exposure</span><strong>{Math.round(o.droughtRisk)}<small>/100</small></strong><small>{o.droughtRisk<30?"Low":o.droughtRisk<60?"Moderate":"High"} exposure · lower is preferable</small></article>
+              <article><span>Team evidence</span><strong>{relevant.length}<small> records</small></strong><small>{relevant.length?"Review provenance and local relevance":"No local records attached"}</small></article>
             </div>
-            <div className="confidence-row">
-              <span>
-                <i className="live-dot" />
-                Model confidence
-              </span>
-              <strong>
-                {Math.round(o.confidence)}%{" "}
-                <span>{o.confidence >= 85 ? "High" : "Moderate"}</span>
-              </strong>
-            </div>
-            <section className="detail-section">
-              <div className="section-heading">
-                <h3>What’s driving the fit?</h3>
-                <span className="muted">Illustrative factors</span>
-              </div>
-              {factors.map((f) => (
-                <div className="factor" key={f.name}>
-                  <div>
-                    <span>{f.name}</span>
-                    <strong>{f.score}</strong>
-                  </div>
-                  <div>
-                    <i style={{ width: f.score + "%" }} />
-                  </div>
-                </div>
-              ))}
-            </section>
-            <div className="insight-card">
-              <Droplets size={18} />
-              <div>
-                <strong>
-                  {o.droughtRisk > 40
-                    ? "Water access needs a closer look"
-                    : "Validate the match on the ground"}
-                </strong>
-                <p>
-                  Check local water availability, drainage and soil conditions
-                  before transferring a growing practice.
-                </p>
-              </div>
-            </div>
-            <section className="detail-section">
-              <h3>A little more context</h3>
-              <dl className="data-list">
-                <div>
-                  <dt>Screened sample</dt>
-                  <dd>{cell ? "1 cell · 100 ha" : "36 cells · 3,600 ha"}</dd>
-                </div>
-                <div>
-                  <dt>Environment</dt>
-                  <dd>{aez.classification}</dd>
-                </div>
-                <div>
-                  <dt>Potential yield</dt>
-                  <dd>
-                    {o.yieldRange[0]}–{o.yieldRange[1]} t/ha
-                  </dd>
-                </div>
-                <div>
-                  <dt>Nearby processors</dt>
-                  <dd>
-                    {site.processorCount}{" "}
-                    <span className="muted">illustrative</span>
-                  </dd>
-                </div>
-              </dl>
-              <button
-                className="text-button"
-                onClick={() => setTab("Evidence")}
-              >
-                Understand the evidence <ArrowRight size={14} />
-              </button>
-            </section>
-          </>
+            <div className="overview-columns"><section className="analysis-card"><div className="analysis-card-heading"><h4>Environmental checkpoints</h4><span>Species screening</span></div>{[
+              {name:"Mean temperature",value:`${o.meanTemperatureC.toFixed(1)} °C`,range:`${crop.temperature.join("–")} °C`,inside:o.meanTemperatureC>=crop.temperature[0]&&o.meanTemperatureC<=crop.temperature[1],target:"Climate"},
+              {name:"Annual rainfall",value:`${Math.round(o.annualRainfallMm)} mm`,range:`${crop.rainfall.join("–")} mm`,inside:o.annualRainfallMm>=crop.rainfall[0]&&o.annualRainfallMm<=crop.rainfall[1],target:"Climate"},
+              {name:"Soil pH",value:soil.ph.toFixed(1),range:crop.ph.join("–"),inside:soil.ph>=crop.ph[0]&&soil.ph<=crop.ph[1],target:"Soil"},
+            ].map(item=><button className="environment-check" key={item.name} onClick={()=>setTab(item.target)}><span className={item.inside?"checkpoint-dot aligned":"checkpoint-dot"}/><span><strong>{item.name}</strong><small>Crop screening range {item.range}</small></span><span><strong>{item.value}</strong><small>{item.inside?"Within range":"Review constraint"}</small></span><ArrowRight size={14}/></button>)}<p className="analysis-footnote">Averages can conceal extremes. Review climate variation, soil distribution and management requirements.</p></section>
+            <section className="analysis-card next-steps"><div className="analysis-card-heading"><h4>What to do next</h4></div><button onClick={()=>setTab("Crop intelligence")}><LeafIcon/><span><strong>Explore alternative crops</strong><small>Compare environmental fit at this location.</small></span><ArrowRight size={15}/></button><button onClick={()=>setTab("Decision tools")}><FlaskConical size={18}/><span><strong>Test a decision</strong><small>Review supply, transition costs or trial readiness.</small></span><ArrowRight size={15}/></button><button onClick={()=>setTab("Evidence")}><FileCheck2 size={18}/><span><strong>Close the evidence gaps</strong><small>Check field trials, soil tests and source limits.</small></span><ArrowRight size={15}/></button></section></div>
+            <div className="analysis-provenance"><Info size={17}/><p><strong>Screening confidence: {Math.round(o.confidence)}/100.</strong> This synthetic index is not a probability. {cell?"Selected 1 km cell":`${site.cellCount} sample cells · ${site.sampledAreaHa.toLocaleString()} ha`} · species-level model · validate variety performance locally.</p></div>
+          </section>
         )}
         {tab === "Growing context" && (
           <>
@@ -369,6 +320,7 @@ export default function LocationDetail({
               <h3>Learn from this growing origin</h3>
               <span className="pill neutral">Sourced context</span>
             </div>
+            <TabInsight>{insight["Growing context"]}</TabInsight>
             {db.growingEvidence.find(
               (e) => e.country === site.country && e.cropId === context.crop,
             ) ? (
@@ -468,6 +420,7 @@ export default function LocationDetail({
                   : "Projection"}
               </span>
             </div>
+            <TabInsight>{insight["Climate"]}</TabInsight>
             <p className="body-muted">
               {context.period === "baseline"
                 ? "A synthetic baseline for 2021–2025."
@@ -581,6 +534,7 @@ export default function LocationDetail({
               </h3>
               <span className="pill neutral">Synthetic</span>
             </div>
+            <TabInsight>{insight["Soil"]}</TabInsight>
             <p className="body-muted">
               {cell
                 ? "Cell-specific mock values."
@@ -640,6 +594,7 @@ export default function LocationDetail({
               <FlaskConical size={18} />
               <span>Regional screening cannot replace a field soil test.</span>
             </div>
+            <SoilDistributions site={site} />
             <button className="button secondary full" onClick={onEvidence}>
               <Plus size={15} />
               Attach soil test evidence
@@ -649,9 +604,10 @@ export default function LocationDetail({
         {tab === "Economics" && (
           <>
             <div className="section-heading">
-              <h3>Does the decision add up?</h3>
+              <h3>Economic assumptions</h3>
               <span className="pill neutral">Scenario</span>
             </div>
+            <TabInsight>{insight["Economics"]}</TabInsight>
             <p className="body-muted">
               Test assumptions for one hectare. Demo amounts are normalised to
               INR for cross-country comparison. Costs and prices are
@@ -668,6 +624,7 @@ export default function LocationDetail({
                 {money(o.yieldRange[1] * price - cost - logistics)} yield range
               </small>
             </div>
+            <button className="text-button economics-reset" onClick={() => { setPriceDelta(0); setCostDelta(0); setLogistics(6500); }} disabled={!priceDelta && !costDelta && logistics === 6500}><RotateCcw size={14} />Reset to demo baseline</button>
             <label className="slider-field">
               <span>
                 Farmgate price <strong>{money(price)}/t</strong>
@@ -700,12 +657,12 @@ export default function LocationDetail({
             </label>
             <label>
               Delivered logistics cost / ha
-              <input
+              <input aria-label="Delivered logistics cost per hectare"
                 type="number"
                 min="0"
                 max="100000"
                 value={logistics}
-                onChange={(e) => setLogistics(Math.max(0, +e.target.value))}
+                onChange={(e) => setLogistics(Math.min(100000, Math.max(0, Number(e.target.value) || 0)))}
               />
             </label>
             <dl className="data-list">
@@ -777,6 +734,7 @@ export default function LocationDetail({
                   Add
                 </button>
               </div>
+              <TabInsight>{insight.Evidence}</TabInsight>
               {relevant.length ? (
                 relevant.map((e) => (
                   <div className="evidence-entry" key={e.id}>
@@ -831,6 +789,7 @@ export default function LocationDetail({
             )}
           </>
         )}
+      </div>
       </div>
       <div className="detail-footer">
         <button

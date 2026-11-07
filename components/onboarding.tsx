@@ -1,410 +1,45 @@
 "use client";
-import { useState, useEffect } from "react";
-import {
-  ArrowRight,
-  ArrowLeft,
-  Check,
-  Globe2,
-  Sprout,
-  Landmark,
-  Trees,
-  FlaskConical,
-  Package,
-  MapPin,
-  Leaf,
-  Users,
-} from "lucide-react";
+import SearchSelect from "./search-select";
+import { useState, useEffect, useRef } from "react";
+import { ArrowRight, ArrowLeft, Check, Globe2, Sprout, Landmark, Trees, FlaskConical, Package, MapPin, Leaf, ChevronDown, ShieldCheck, ArrowUpRight } from "lucide-react";
 import { Brand } from "./ui-kit";
 import LocationPicker from "./location-picker";
-import { Context, db, defaultContext } from "../lib/model";
-const personas = [
-  {
-    name: "Commodity sourcing",
-    description: "Build a resilient supply network",
-    icon: Globe2,
-  },
-  {
-    name: "Seed business",
-    description: "Find trial sites & new markets",
-    icon: Sprout,
-  },
-  {
-    name: "Agricultural finance",
-    description: "Understand portfolio exposure",
-    icon: Landmark,
-  },
-  {
-    name: "Land & estates",
-    description: "Choose what to grow, and where",
-    icon: Trees,
-  },
-  {
-    name: "Ingredient buying",
-    description: "Match origins to your needs",
-    icon: Package,
-  },
-  {
-    name: "Research",
-    description: "Explore environments & evidence",
-    icon: FlaskConical,
-  },
-];
-export default function Onboarding({
-  onComplete,
-  onDemo,
-  initialContext = defaultContext,
-  onLocate,
-  locating = false,
-  geoMethod = "",
-}: {
-  initialContext?: Context;
-  onLocate: () => void;
-  locating?: boolean;
-  geoMethod?: string;
-  onComplete: (v: {
-    workspace: string;
-    project: string;
-    persona: string;
-    context: Context;
-    invite: string;
-    mode: string;
-  }) => void;
-  onDemo: () => void;
-}) {
-  const [step, setStep] = useState(0),
-    [persona, setPersona] = useState("Commodity sourcing"),
-    [workspace, setWorkspace] = useState("SBSF Agritech"),
-    [project, setProject] = useState("Resilient cotton sourcing"),
-    [mode, setMode] = useState("Find land for a crop"),
-    [context, setContext] = useState(initialContext),
-    [invite, setInvite] = useState("");
-  useEffect(
-    () => setContext((c) => ({ ...c, region: initialContext.region })),
-    [initialContext.region],
-  );
-  return (
-    <div className="onboarding">
-      <section className="onboard-main">
-        <Brand />
-        <div className="onboard-content">
-          <div className="step-label">
-            YOUR WORKSPACE, YOUR WAY <span>0{step + 1} / 03</span>
+import { type Context, db, defaultContext, getCrop } from "../lib/model";
+import { geographyLabel, inGeography } from "../lib/geography";
+const personas=[{name:"Commodity sourcing",description:"Compare origins and build a shortlist",icon:Globe2,project:"Resilient crop sourcing"},{name:"Seed business",description:"Screen environments for variety trials",icon:Sprout,project:"Next season trial sites"},{name:"Agricultural finance",description:"Review crop and climate exposure",icon:Landmark,project:"Crop exposure review"},{name:"Land & estates",description:"Explore crops for your land",icon:Trees,project:"Land diversification"},{name:"Ingredient buying",description:"Find crops and suitable origins",icon:Package,project:"Ingredient sourcing shortlist"},{name:"Research",description:"Explore environments and evidence",icon:FlaskConical,project:"Growing environment study"}];
+const steps=[{label:"Work focus",description:"Choose what brings you here"},{label:"Crop & land",description:"Set your starting search"},{label:"Your workspace",description:"Name and review your project"}];
+type Draft={version?:number;otherFocus?:string;step:number;persona:string;workspace:string;project:string;mode:string;context:Context;sample:string};
+const draftKey="cl-onboarding-draft-v3";
+export default function Onboarding({onComplete,onDemo,initialContext=defaultContext,onLocate,locating=false,geoMethod=""}:{initialContext?:Context;onLocate:()=>void;locating?:boolean;geoMethod?:string;onComplete:(value:{workspace:string;project:string;persona:string;context:Context;invite:string;mode:string})=>void;onDemo:()=>void}) {
+  const [step,setStep]=useState(0),[persona,setPersona]=useState("Commodity sourcing"),[workspace,setWorkspace]=useState("SBSF Agritech"),[project,setProject]=useState("Resilient crop sourcing"),[mode,setMode]=useState("Find land for a crop"),[context,setContext]=useState({...initialContext,region:initialContext.region==='Near me'?'Worldwide':initialContext.region}),[sample,setSample]=useState(db.locations.find(s=>inGeography(s,initialContext.region))?.id||db.locations[0].id),[advanced,setAdvanced]=useState(false),[loaded,setLoaded]=useState(false),[projectEdited,setProjectEdited]=useState(false),[resumed,setResumed]=useState(false);
+  const [otherFocus,setOtherFocus]=useState("");
+  const [validation,setValidation]=useState("");
+  const question=useRef<HTMLDivElement>(null);
+  const heading=useRef<HTMLHeadingElement>(null),previousStep=useRef(0),waitingForLocation=useRef(false);
+  const findCrops=mode==='Find crops for my land';
+  useEffect(()=>{try{const draft=JSON.parse(localStorage.getItem(draftKey)||localStorage.getItem('cl-onboarding-draft-v2')||'null') as Draft|null;if(draft&&steps[draft.step]&&(personas.some(p=>p.name===draft.persona)||draft.persona==='Other')&&draft.workspace&&db.crops.some(c=>c.id===draft.context?.crop)&&db.periods.some(p=>p.id===draft.context?.period)&&['Main season','Kharif','Rabi'].includes(draft.context?.season)&&['rainfed','irrigated'].includes(draft.context?.water)&&['ssp245','ssp585'].includes(draft.context?.scenario)){setStep(draft.version===3?draft.step:[0,2,1][draft.step]);setOtherFocus(draft.otherFocus||"");setPersona(draft.persona);setWorkspace(draft.workspace);setProject(draft.project);setMode(draft.mode);setContext(draft.context);setSample(db.locations.some(s=>s.id===draft.sample)?draft.sample:db.locations[0].id);setProjectEdited(true);setResumed(true);}}catch{}setLoaded(true);},[]);
+  useEffect(()=>{if(loaded)try{localStorage.setItem(draftKey,JSON.stringify({version:3,step,persona,otherFocus,workspace,project,mode,context,sample}));}catch{}},[loaded,step,persona,otherFocus,workspace,project,mode,context,sample]);
+  useEffect(()=>{if(previousStep.current!==step){if(question.current)question.current.scrollTop=0;heading.current?.focus();previousStep.current=step;}},[step]);
+  useEffect(()=>{if(waitingForLocation.current&&!locating&&initialContext.region!=='Near me'){setContext(c=>({...c,region:initialContext.region}));waitingForLocation.current=false;}},[initialContext.region,locating]);
+  const activePersona=personas.find(p=>p.name===persona)||{name:"Other",description:otherFocus||"Your growing decision",icon:FlaskConical,project:"My first decision"};
+  const actualContext={...context,region:findCrops?'site:'+sample:context.region};
+  function finish(){try{localStorage.removeItem(draftKey);localStorage.removeItem("cl-onboarding-draft-v2");}catch{}onComplete({workspace:workspace.trim(),project:project.trim(),persona:persona==="Other"?otherFocus.trim():persona,mode,context:actualContext,invite:""});}
+  return <div className="setup-flow">
+    <header className="setup-header"><Brand/><button className="text-button" onClick={onDemo}>Explore the demo<ArrowUpRight size={14}/></button></header>
+    <main className="setup-layout">
+      <aside className="setup-guide"><span className="eyebrow">YOUR FIRST DECISION</span><h2>Set up your<br/>workspace.</h2><p>Start with your goal. Choose a crop or location, then open your first project.</p><ol className="setup-stepper" aria-label="Setup progress">{steps.map((item,i)=><li key={item.label} className={i===step?'current':i<step?'complete':''}><button type="button" disabled={i>step} aria-current={i===step?'step':undefined} onClick={()=>setStep(i)}><span>{i<step?<Check size={15}/>:i+1}</span><span><strong>{item.label}</strong><small>{item.description}</small></span></button></li>)}</ol><div className="setup-guide-note"><ShieldCheck size={18}/><p>Setup is saved in this browser. You can change these choices in the workspace.</p></div></aside>
+      <section className="setup-card"><div className="setup-step-label"><span>STEP {step+1} OF 3</span><span>About 2 minutes</span></div>{resumed&&<div className="setup-resumed" role="status">Your previous setup has been restored.<button onClick={()=>setResumed(false)} aria-label="Dismiss restored setup message">Dismiss</button></div>}
+        <div className="setup-progress-track" aria-hidden="true">{steps.map((_,i)=><span key={i} className={i<=step?"filled":""}/>)}</div><h1 ref={heading} tabIndex={-1}>{step===0?'What brings you here?':step===1?'Choose your crop and land.':'Name your workspace.'}</h1><p className="setup-intro">{step===0?'Choose the work you do. You can change this later.':step===1?'Choose how you want to explore, then select your crop and starting location.':'Review your starting search and give your first project a name.'}</p>
+        <form onSubmit={event=>{event.preventDefault();if(step===2&&(!workspace.trim()||!project.trim())){setValidation("Enter a workspace name and a project name to continue.");return;}setValidation("");if(step===0&&persona==="Other"&&!otherFocus.trim())return;if(step<2)setStep(step+1);else finish();}}>
+          <div className="setup-question-content" ref={question}>
+          {step===0&&<><fieldset className="setup-focus-grid"><legend className="sr-only">Your work focus</legend>{personas.map(item=><button type="button" key={item.name} className={persona===item.name?'selected':''} aria-pressed={persona===item.name} onClick={()=>{setPersona(item.name);if(!projectEdited)setProject(item.project);setMode(item.name==='Land & estates'?'Find crops for my land':'Find land for a crop');}}><item.icon size={23}/><strong>{item.name}</strong><small>{item.description}</small>{persona===item.name&&<Check className="focus-selected-check" size={15}/>}</button>)}</fieldset><button type="button" className={"setup-other-choice "+(persona==='Other'?'selected':'')} aria-expanded={persona==='Other'} onClick={()=>{setPersona('Other');if(!projectEdited)setProject('My first growing decision');}}>Other work focus <ArrowRight size={13}/></button>{persona==='Other'&&<label className="setup-other-input">Tell us about your work<input required autoFocus maxLength={90} aria-label="Other work focus" value={otherFocus} onChange={e=>setOtherFocus(e.target.value)} placeholder="e.g. Cooperative manager"/></label>}</>}
+          {step===1&&<div className="setup-fields"><fieldset className="setup-objectives"><legend className="sr-only">Starting task</legend>{[{name:'Find land for a crop',icon:MapPin,description:'Compare growing regions for a crop you already have in mind.',outcome:'Start with crop → discover locations'},{name:'Find crops for my land',icon:Leaf,description:'Explore crop options for a sample location or growing area.',outcome:'Start with location → discover crops'}].map(item=><button type="button" key={item.name} className={mode===item.name?'selected':''} aria-pressed={mode===item.name} onClick={()=>setMode(item.name)}><span className="setup-objective-icon"><item.icon size={22}/></span><span><strong>{item.name}</strong><small>{item.description}</small><em>{item.outcome}</em></span><span className="setup-radio">{mode===item.name&&<span/>}</span></button>)}</fieldset><div className="setup-context-grid"><label>{findCrops?'Initial crop focus':'Priority crop'}<SearchSelect aria-label="Priority crop" value={context.crop} onChange={event=>setContext({...context,crop:event.target.value})}>{db.crops.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</SearchSelect><small>{findCrops?'All crops will be ranked; this opens the first analysis.':'Start with one crop, then compare alternatives.'}</small></label><div><label>{findCrops?'Sample location':'Starting location'}</label><LocationPicker compact sampleOnly={findCrops} value={findCrops?'site:'+sample:context.region} onChange={value=>findCrops?setSample(value.replace('site:','')):setContext({...context,region:value})} onLocate={()=>{waitingForLocation.current=true;onLocate();}} locating={locating} method={findCrops?'Choose a covered sample area':geoMethod}/><small className="setup-field-hint">{findCrops?'Sample locations represent illustrative coverage.':'Search a country, region or sample area.'}</small></div></div><button className="setup-advanced-toggle" type="button" aria-expanded={advanced} onClick={()=>setAdvanced(!advanced)}>Growing conditions <span>Optional · {context.season} · {context.water}</span><ChevronDown size={15}/></button>{advanced&&<div className="setup-advanced"><label>Growing season<SearchSelect aria-label="Setup growing season" value={context.season} onChange={event=>setContext({...context,season:event.target.value})}>{['Main season','Kharif','Rabi'].map(value=><option key={value}>{value}</option>)}</SearchSelect></label><label>Water regime<SearchSelect aria-label="Setup water regime" value={context.water} onChange={event=>setContext({...context,water:event.target.value})}><option value="rainfed">Rainfed</option><option value="irrigated">Irrigated</option></SearchSelect></label></div>}</div>}
+          {step===2&&<div className="setup-fields"><label>Workspace name<input required maxLength={70} autoComplete="organization" value={workspace} onChange={event=>setWorkspace(event.target.value)} placeholder="e.g. Your organisation"/><small>Shown in the sidebar. You can rename it later.</small></label><label>First project<input required maxLength={90} value={project} onChange={event=>{setProject(event.target.value);setProjectEdited(true);}} placeholder="e.g. Next season sourcing shortlist"/><small>Name the decision you want to work on.</small></label><div className="setup-review"><div><strong>Ready to open</strong><button type="button" onClick={()=>setStep(1)}>Edit crop & land</button></div><dl><div><dt>Work focus</dt><dd>{persona==="Other"?otherFocus:persona}</dd></div><div><dt>Starting task</dt><dd>{findCrops?'Find crops':'Find land'}</dd></div><div><dt>Search context</dt><dd>{getCrop(context.crop).name} · {geographyLabel(actualContext.region)}</dd></div><div><dt>Conditions</dt><dd>{context.season} · {context.water}</dd></div></dl></div></div>}
           </div>
-          <h1>
-            {step === 0 ? (
-              <>
-                Good decisions
-                <br />
-                start with <em>good ground.</em>
-              </>
-            ) : step === 1 ? (
-              <>
-                A place for your
-                <br />
-                <em>next big decision.</em>
-              </>
-            ) : (
-              <>
-                Let’s find your
-                <br />
-                <em>starting point.</em>
-              </>
-            )}
-          </h1>
-          <p className="onboard-intro">
-            {step === 0
-              ? "Tell us what brings you here. We’ll shape your workspace around the decisions you make."
-              : step === 1
-                ? "Keep locations, evidence and your team’s thinking together in a project."
-                : "Start with one crop and region. You can explore every crop, location and scenario later."}
-          </p>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (step < 2) setStep(step + 1);
-              else
-                onComplete({
-                  workspace,
-                  project,
-                  persona,
-                  context,
-                  invite,
-                  mode,
-                });
-            }}
-          >
-            {step === 0 ? (
-              <div className="persona-grid">
-                {personas.map((p) => (
-                  <button
-                    type="button"
-                    key={p.name}
-                    className={
-                      "persona " + (persona === p.name ? "selected" : "")
-                    }
-                    onClick={() => setPersona(p.name)}
-                  >
-                    <p.icon size={22} />
-                    <strong>{p.name}</strong>
-                    <small>{p.description}</small>
-                    {persona === p.name && (
-                      <Check className="persona-check" size={15} />
-                    )}
-                  </button>
-                ))}
-              </div>
-            ) : step === 1 ? (
-              <div className="onboard-fields">
-                <label>
-                  Workspace name
-                  <input
-                    required
-                    maxLength={70}
-                    value={workspace}
-                    onChange={(e) => setWorkspace(e.target.value)}
-                  />
-                  <small>Your team’s shared home.</small>
-                </label>
-                <label>
-                  First project
-                  <input
-                    required
-                    maxLength={90}
-                    value={project}
-                    onChange={(e) => setProject(e.target.value)}
-                  />
-                </label>
-                <label>What would you like to do first?</label>
-                <div className="choice-row">
-                  {["Find land for a crop", "Find crops for my land"].map(
-                    (m) => (
-                      <button
-                        type="button"
-                        key={m}
-                        className={mode === m ? "selected" : ""}
-                        onClick={() => setMode(m)}
-                      >
-                        <MapPin size={17} />
-                        {m}
-                        {mode === m && <Check size={16} />}
-                      </button>
-                    ),
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="onboard-fields">
-                <div className="form-grid">
-                  <label>
-                    Priority crop
-                    <select
-                      value={context.crop}
-                      onChange={(e) => {
-                        setContext({
-                          ...context,
-                          crop: e.target.value,
-                          season: db.crops.find((c) => c.id === e.target.value)!
-                            .season,
-                        });
-                      }}
-                    >
-                      {db.crops.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="onboard-location">
-                    <label>Starting location</label>
-                    <LocationPicker
-                      compact
-                      value={context.region}
-                      onChange={(region) => setContext({ ...context, region })}
-                      onLocate={onLocate}
-                      locating={locating}
-                      method={geoMethod}
-                    />
-                  </div>
-                </div>
-                <label>
-                  Growing season
-                  <select
-                    value={context.season}
-                    onChange={(e) =>
-                      setContext({ ...context, season: e.target.value })
-                    }
-                  >
-                    <option>Main season</option>
-                    <option>Kharif</option>
-                    <option>Rabi</option>
-                  </select>
-                </label>
-                <label>
-                  Bring a teammate <span className="muted">(optional)</span>
-                  <input
-                    type="email"
-                    placeholder="colleague@company.com"
-                    value={invite}
-                    onChange={(e) => setInvite(e.target.value)}
-                  />
-                  <small>
-                    Prototype invitation only. No email will be sent.
-                  </small>
-                </label>
-                <div className="inline-note">
-                  <Leaf size={17} />
-                  <span>
-                    Your workspace starts with clearly labelled, illustrative
-                    data.
-                  </span>
-                </div>
-              </div>
-            )}
-            <div className="onboard-actions">
-              {step > 0 && (
-                <button
-                  type="button"
-                  className="button ghost"
-                  onClick={() => setStep(step - 1)}
-                >
-                  <ArrowLeft size={16} />
-                  Back
-                </button>
-              )}
-              <button
-                className="button primary"
-                type="submit"
-                disabled={step === 2 && context.region === "Near me"}
-              >
-                {step === 2 ? "Open my workspace" : "Continue"}
-                <ArrowRight size={17} />
-              </button>
-              {step === 0 && (
-                <button type="button" className="text-button" onClick={onDemo}>
-                  Explore the demo first <ArrowUpRightIcon />
-                </button>
-              )}
-            </div>
-          </form>
-        </div>
-        <footer>
-          Environmental intelligence. Human decisions.
-          <span>© 2026 SBSF Agritech</span>
-        </footer>
+          {validation&&<p className="setup-validation" role="alert">{validation}</p>}
+          <div className="setup-actions">{step>0?<button type="button" className="button secondary" onClick={()=>setStep(step-1)}><ArrowLeft size={15}/>Back</button>:<span className="setup-no-account">No account setup needed</span>}<button className="button primary" type="submit" disabled={(step===2&&(!workspace.trim()||!project.trim()))||(step===0&&persona==='Other'&&!otherFocus.trim())}>{step===2?'Open my workspace':'Continue'}<ArrowRight size={16}/></button></div>
+        </form>
       </section>
-      <aside className="onboard-story">
-        <span className="story-kicker">
-          <span className="live-dot" />
-          LAND INTELLIGENCE, CONNECTED.
-        </span>
-        <div className="story-map">
-          <svg viewBox="0 0 600 550" aria-hidden="true">
-            <defs>
-              <pattern
-                id="onboardgrid"
-                width="24"
-                height="24"
-                patternUnits="userSpaceOnUse"
-              >
-                <path
-                  d="M24 0H0V24"
-                  fill="none"
-                  stroke="#7b9d7a"
-                  strokeWidth=".5"
-                  opacity=".28"
-                />
-              </pattern>
-              <radialGradient id="mapglow">
-                <stop stopColor="#a8bc7e" stopOpacity=".2" />
-                <stop offset="1" stopColor="#193e32" stopOpacity="0" />
-              </radialGradient>
-            </defs>
-            <rect width="600" height="550" fill="url(#mapglow)" />
-            <path
-              d="M98 88L213 52 293 102 342 90 406 142 465 157 443 243 472 307 409 324 383 399 298 471 278 423 220 386 186 312 125 285 157 214 112 179Z"
-              fill="url(#onboardgrid)"
-              stroke="#90aa80"
-              strokeWidth="1.5"
-              opacity=".6"
-            />
-            {[0, 1, 2, 3, 4, 5, 6].map((i) => (
-              <path
-                key={i}
-                d={`M${30 + i * 18} ${150 + i * 38} Q220 ${40 + i * 55} 350 ${180 + i * 32} T610 ${210 + i * 40}`}
-                fill="none"
-                stroke="#aec59a"
-                strokeWidth=".7"
-                opacity=".15"
-              />
-            ))}
-            <path
-              d="M200 220Q270 145 367 221T320 355"
-              stroke="#b4d696"
-              strokeDasharray="4 6"
-              fill="none"
-              opacity=".6"
-            />
-            {[
-              [200, 220],
-              [367, 221],
-              [320, 355],
-            ].map(([x, y], i) => (
-              <g key={i}>
-                <circle cx={x} cy={y} r="26" fill="#c9dfae" opacity=".08" />
-                <circle cx={x} cy={y} r="15" fill="#bed89b" />
-                <circle cx={x} cy={y} r="5" fill="#214d3b" />
-              </g>
-            ))}
-          </svg>
-          <div className="story-fit">
-            <span>
-              <Leaf size={16} /> An environment that fits.
-            </span>
-            <strong>
-              92<span>/100</span>
-            </strong>
-            <small>Illustrative environmental suitability</small>
-            <div className="tiny-progress">
-              <i />
-            </div>
-          </div>
-          <div className="story-coordinate">21.0077° N · 75.5626° E</div>
-        </div>
-        <div className="story-copy">
-          <span className="eyebrow">FROM POSSIBILITY TO A PLAN</span>
-          <h2>
-            Right crop.
-            <br />
-            Right place.
-            <br />
-            <em>Shared confidence.</em>
-          </h2>
-          <p>
-            Discover, compare and decide — with the land at the centre and your
-            team in the loop.
-          </p>
-          <div className="story-steps">
-            {["Discover", "Compare", "Decide"].map((s, i) => (
-              <span key={s}>
-                <b>0{i + 1}</b>
-                {s}
-              </span>
-            ))}
-          </div>
-        </div>
-        <div className="story-bottom">
-          <Users size={15} /> Built for the people behind every growing
-          decision.
-        </div>
-      </aside>
-    </div>
-  );
-}
-function ArrowUpRightIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
-      <path d="M5 15L15 5M5 5H15V15" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
-  );
+    </main><footer className="setup-footer"><span>CropLocator · SBSF Agritech</span><span>Your setup stays in this browser.</span></footer>
+  </div>;
 }

@@ -1,0 +1,30 @@
+/* Summaries belong to the section heading they explain. */
+.section-context-heading { margin:0 0 22px; }
+.section-context-heading h3 { color:#2e4d35; font-size:18px; font-weight:600; line-height:1.4; }
+.section-context-heading .tab-executive-summary,
+.feature-section-heading .tab-executive-summary,
+.advanced-view-heading .tab-executive-summary,
+.analysis-section-heading .tab-executive-summary,
+.opportunity-heading .tab-executive-summary,
+.intelligence-intro .tab-executive-summary,
+.decision-chart figcaption .tab-executive-summary,
+.timeline-change-heading .tab-executive-summary { margin:9px 0 0; font-size:14px; line-height:1.75; color:#536356; font-family:"DM Sans",sans-serif; font-weight:400; max-width:100ch; }
+.compare-tab-insight.section-context-heading { padding-inline:22px; }
+.timeline-change-heading { align-items:flex-start; }
+.timeline-change-heading > div:first-child { flex:1; min-width:0; }
+.timeline-change-heading > .timeline-segments { flex:0 0 auto; }
+.feature-section-heading > div:first-child,
+.advanced-view-heading > div:first-child,
+.opportunity-heading > div:first-child { min-width:0; flex:1; }
+@media(max-width:760px){
+ .compare-tab-insight.section-context-heading { padding-inline:16px; }
+ .section-context-heading .tab-executive-summary,
+ .feature-section-heading .tab-executive-summary,
+ .advanced-view-heading .tab-executive-summary,
+ .analysis-section-heading .tab-executive-summary,
+ .opportunity-heading .tab-executive-summary,
+ .intelligence-intro .tab-executive-summary,
+ .decision-chart figcaption .tab-executive-summary,
+ .timeline-change-heading .tab-executive-summary { font-size:13px; }
+ .timeline-change-heading > div:first-child { flex-basis:100%; }
+}

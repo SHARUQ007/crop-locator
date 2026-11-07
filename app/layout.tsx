@@ -1,5 +1,14 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./workspace.css";
+import "./intelligence.css";
+import "./onboarding.css";
+import "./advanced-intelligence.css";
+import "./map-search.css";
+import "./crop-health-market.css";
+import "./decision-charts.css";
+import "./climate-timeline.css";
+import "./summary-placement.css";
 
 export const metadata: Metadata = {
   title: "CropLocator — A better place to grow",

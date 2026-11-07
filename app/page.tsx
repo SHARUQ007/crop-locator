@@ -1,4 +1,5 @@
 "use client";
+import SearchSelect from "../components/search-select";
 import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
 import {
   Undo2,
@@ -34,6 +35,8 @@ import {
   Command,
   Bell,
   PanelLeftClose,
+  PanelLeftOpen,
+  RotateCcw,
   SquareDashedMousePointer,
   FileText,
   Share2,
@@ -57,7 +60,13 @@ import {
   ChevronUp,
   LoaderCircle,
 } from "lucide-react";
+import MarketIntelligence from "../components/market-intelligence";
+import CropResults from "../components/crop-results";
+import ComparisonWorkspace from "../components/comparison-workspace";
+import { SearchField, SummaryStrip, NoResults, FilterSelect, CommandMenu } from "../components/workspace-ui";
+import { useDismiss } from "../hooks/use-dismiss";
 import { useUndoRedo } from "../hooks/use-undo-redo";
+import { inSearchBounds, type SearchBounds } from "../lib/map-search";
 import { matchesSearch } from "../lib/search";
 import ExplorerMap from "../components/explorer-map";
 const LocationDetail = lazy(() => import("../components/location-detail"));
@@ -93,8 +102,9 @@ import {
 } from "../lib/model";
 
 type ModalName =
+  | "preferences"
+  | "switch-project"
   | "project"
-  | "compare"
   | "save"
   | "scenario"
   | "invite"
@@ -106,6 +116,7 @@ type ModalName =
   | null;
 const navItems = [
   { id: "explore", label: "Explore", icon: Compass },
+  { id: "compare", label: "Compare", icon: GitCompareArrows },
   { id: "projects", label: "Projects", icon: FolderOpen },
   { id: "crops", label: "Crop library", icon: Leaf },
   { id: "evidence", label: "Evidence", icon: Database },
@@ -176,6 +187,12 @@ export default function Home() {
       "cl-evidence-v1",
       sampleEvidence,
     );
+  const [density, setDensity] = useStored("cl-density-v1", "comfortable");
+  const [navCompact, setNavCompact] = useStored("cl-nav-compact-v1", false);
+  const [evidenceType, setEvidenceType] = useState("all"), [evidenceCrop, setEvidenceCrop] = useState("all"),
+    [teamRole, setTeamRole] = useState("all"), [teamStatus, setTeamStatus] = useState("all"),
+    [projectSort, setProjectSort] = useState("recent"), [cropSort, setCropSort] = useState("name"),
+    [preferencesName, setPreferencesName] = useState("");
   const [activeProject, setActiveProject] = useState("p1"),
     [projectDetail, setProjectDetail] = useState<string | null>(null),
     [projectTab, setProjectTab] = useState("Shortlist");
@@ -201,9 +218,11 @@ export default function Home() {
     [projectFilter, setProjectFilter] = useState("All projects"),
     [cropCategory, setCropCategory] = useState("All crops"),
     [cropDetail, setCropDetail] = useState("cotton"),
-    [compareTab, setCompareTab] = useState("Fit & climate"),
     [isLoading, setIsLoading] = useState(false),
-    [rawCells, setRawCells] = useState<any[]>([]);
+    [rawCells, setRawCells] = useState<any[]>([]),
+    [mapExpanded, setMapExpanded] = useState(false),
+    [cellLoadError, setCellLoadError] = useState(false),
+    [cellRetry, setCellRetry] = useState(0);
   const [formName, setFormName] = useState(""),
     [formDescription, setFormDescription] = useState(""),
     [formGoal, setFormGoal] = useState("Source a crop"),
@@ -232,7 +251,13 @@ export default function Home() {
     [locating, setLocating] = useState(false),
     [lens, setLens] = useState("Suitability"),
     [benchmark, setBenchmark] = useState("jalgaon");
+  const [mapSearch,setMapSearch] = useState<{region:string;bounds:SearchBounds}|null>(null);
+  const [mapHover,setMapHover] = useState<string|null>(null);
+  const activeMapBounds = mapSearch?.region === context.region ? mapSearch.bounds : null;
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const workspaceMenuRef = useDismiss(teamMenu, () => setTeamMenu(false));
+  const notificationRef = useDismiss(notifications, () => setNotifications(false));
+  const filterRef = useDismiss(filters, () => setFilters(false));
   const project = projects.find((p) => p.id === activeProject) || projects[0];
   const visibleSites = useMemo(
     () => db.locations.filter((s) => inGeography(s, context.region)),
@@ -244,6 +269,7 @@ export default function Home() {
         .filter((s) => {
           const o = getRecord(s.id, context);
           return (
+            inSearchBounds(s.center, activeMapBounds) &&
             o.suitability >= (lens === "Growing origins" ? 0 : minFit) &&
             (lens !== "Growing origins" ||
               db.growingEvidence.some(
@@ -271,6 +297,7 @@ export default function Home() {
         ),
     [
       visibleSites,
+      activeMapBounds,
       context,
       minFit,
       lowWater,
@@ -283,14 +310,15 @@ export default function Home() {
     ],
   );
   const history = useUndoRedo(
-    { context, mode, land, selected, selectedCell, comparison, minFit, lowWater, verified, sort, layer, projects, members, evidence, activeProject },
+    { context, mode, land, selected, selectedCell, comparison, mapSearch, minFit, lowWater, verified, sort, layer, projects, members, evidence, activeProject, workspace, density, navCompact },
     (state) => {
       setContext(state.context); setMode(state.mode); setLand(state.land);
-      setSelected(state.selected); setSelectedCell(state.selectedCell);
+      setSelected(state.selected); setSelectedCell(state.selectedCell); setMapSearch(state.mapSearch);
       setComparison(state.comparison); setMinFit(state.minFit);
       setLowWater(state.lowWater); setVerified(state.verified);
       setSort(state.sort); setLayer(state.layer); setProjects(state.projects);
       setMembers(state.members); setEvidence(state.evidence); setActiveProject(state.activeProject);
+      setWorkspace(state.workspace); setDensity(state.density); setNavCompact(state.navCompact);
       localStorage.setItem("cl-location-choice-v1", state.context.region);
     }, ready,
   );
@@ -311,6 +339,8 @@ export default function Home() {
         .sort((a, b) =>
           sort === "water"
             ? a.record.droughtRisk - b.record.droughtRisk
+            : sort === "margin"
+              ? (b.record.yieldTHa*b.record.priceINRTonne-b.record.inputCostINRHa)-(a.record.yieldTHa*a.record.priceINRTonne-a.record.inputCostINRHa)
             : sort === "yield"
               ? b.record.yieldTHa - a.record.yieldTHa
               : b.record.suitability - a.record.suitability,
@@ -369,6 +399,8 @@ export default function Home() {
         setQueryPeriod(false);
         setTeamMenu(false);
         setNotifications(false);
+        setMapExpanded(false);
+        setSidebarOpen(false);
       }
     };
     window.addEventListener("keydown", fn);
@@ -376,6 +408,7 @@ export default function Home() {
   }, []);
   useEffect(() => {
     setIsLoading(true);
+    setCellLoadError(false);
     setRawCells([]);
     let active = true;
     fetch(
@@ -389,7 +422,7 @@ export default function Home() {
         if (active) setRawCells(rows as any[]);
       })
       .catch(() => {
-        if (active) setRawCells([]);
+        if (active) { setRawCells([]); setCellLoadError(true); }
       })
       .finally(() => {
         if (active) setIsLoading(false);
@@ -397,12 +430,34 @@ export default function Home() {
     return () => {
       active = false;
     };
-  }, [context.crop, context.period, context.scenario]);
+  }, [context.crop, context.period, context.scenario, cellRetry]);
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const sidebar = document.querySelector<HTMLElement>(".sidebar");
+    sidebar?.querySelector<HTMLButtonElement>(".sidebar-mobile-close")?.focus();
+    const containFocus = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const controls = Array.from(sidebar?.querySelectorAll<HTMLElement>("button, a, input") || []).filter(el => el.getClientRects().length && !el.hasAttribute("disabled"));
+      const first = controls[0], last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    const resize = () => { if (window.innerWidth > 900) setSidebarOpen(false); };
+    document.addEventListener("keydown", containFocus);
+    window.addEventListener("resize", resize);
+    return () => { document.removeEventListener("keydown", containFocus); window.removeEventListener("resize", resize); document.body.style.overflow = previousOverflow; if (previous?.isConnected) previous.focus(); };
+  }, [sidebarOpen]);
+
   function notify(message: string) {
     setToast(message);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(""), 4500);
   }
+  function resetFilters() { setMapSearch(null); setMinFit(60); setLowWater(false); setVerified(false); setListSearch(""); }
+  function openPreferences() { setPreferencesName(workspace); setModal("preferences"); }
   function navigate(id: string) {
     setPage(id);
     setProjectDetail(null);
@@ -423,6 +478,7 @@ export default function Home() {
     setRestoredScenario("");
   }
   function chooseRegion(region: string) {
+    setMapSearch(null);
     setContext((c) => ({ ...c, region }));
     setSelected(null);
     setSelectedCell(null);
@@ -491,13 +547,15 @@ export default function Home() {
     setSaveTarget(activeProject);
     setModal("save");
   }
-  function addToProject(items: Candidate[], target = saveTarget) {
+  function addToProject(items: Candidate[], target = saveTarget, updateExisting = false) {
     setProjects((ps) =>
       ps.map((p) => {
         if (p.id !== target) return p;
         const next = [...candidates(p)];
         let added = 0;
         items.forEach((c) => {
+          const existingIndex = next.findIndex(n => n.siteId === c.siteId && n.cropId === c.cropId);
+          if (updateExisting && existingIndex >= 0) next[existingIndex] = { ...c, context: { ...c.context } };
           if (
             !next.some((n) => n.siteId === c.siteId && n.cropId === c.cropId)
           ) {
@@ -522,6 +580,7 @@ export default function Home() {
   }
   function createProject(e: React.FormEvent) {
     e.preventDefault();
+    if (!formName.trim()) { notify("Enter a project name to continue."); return; }
     const id = "p" + Date.now();
     const p: Project = {
       id,
@@ -567,6 +626,7 @@ export default function Home() {
   }
   function saveScenario(e: React.FormEvent) {
     e.preventDefault();
+    if (!formName.trim()) { notify("Enter a scenario name to continue."); return; }
     setProjects((ps) =>
       ps.map((p) =>
         p.id === saveTarget
@@ -610,6 +670,7 @@ export default function Home() {
   }
   function addEvidence(e: React.FormEvent) {
     e.preventDefault();
+    if (!fileRows.length && (!formName.trim() || !formDescription.trim())) { notify("Add an evidence name and observation to continue."); return; }
     const rows: Evidence[] = fileRows.length
       ? fileRows.map((r, i) => ({
           id: "e" + Date.now() + i,
@@ -878,13 +939,22 @@ export default function Home() {
           o.waterRegime === context.water,
       )
     : null;
+  const visibleProjects = projects.filter((p) => (projectFilter === "All projects" || p.status === projectFilter) && matchesSearch(`${p.name} ${p.description} ${p.region} ${p.status}`, search))
+    .sort((a, b) => projectSort === "name" ? a.name.localeCompare(b.name) : projectSort === "candidates" ? candidates(b).length - candidates(a).length : projects.indexOf(b) - projects.indexOf(a));
+  const visibleCrops = db.crops.filter((c) => (cropCategory === "All crops" || c.category === cropCategory) && matchesSearch(`${c.name} ${c.scientificName} ${c.category}`, search))
+    .sort((a, b) => cropSort === "season" ? a.season.localeCompare(b.season) || a.name.localeCompare(b.name) : a.name.localeCompare(b.name));
+  const visibleEvidence = evidence.filter((e) => (evidenceType === "all" || e.type === evidenceType) && (evidenceCrop === "all" || e.cropId === evidenceCrop) && matchesSearch(`${e.name} ${e.note} ${e.type} ${getSite(e.locationId).name} ${getCrop(e.cropId).name}`, search)).sort((a, b) => b.date.localeCompare(a.date));
+  const visibleMembers = members.filter((m) => (teamRole === "all" || m.role === teamRole) && (teamStatus === "all" || m.status === teamStatus) && matchesSearch(`${m.name} ${m.email} ${m.role} ${projects.find((p) => p.id === m.scope)?.name || m.scope} ${m.status}`, search));
   return (
-    <div className="app-shell">
-      <aside className={"sidebar " + (sidebarOpen ? "mobile-open" : "")}>
-        <Brand />
-        <div className="workspace-selector">
-          <button onClick={() => setTeamMenu(!teamMenu)}>
-            <span className="workspace-icon">S</span>
+    <div className={"app-shell " + (navCompact ? "nav-compact" : "")} data-density={density}>
+      <a className="skip-link" href="#main-content">Skip to content</a>
+      {sidebarOpen && <button className="sidebar-backdrop" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
+      <aside className={"sidebar " + (sidebarOpen ? "mobile-open" : "")} role={sidebarOpen ? "dialog" : undefined} aria-modal={sidebarOpen ? true : undefined} aria-label="Workspace navigation">
+        <div className="sidebar-brand"><Brand /><button className="icon-button sidebar-collapse" aria-label={navCompact ? "Expand sidebar" : "Collapse sidebar"} title={navCompact ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setNavCompact(!navCompact)}>{navCompact ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button><button className="icon-button sidebar-mobile-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={19} /></button></div>
+        <div className="sidebar-content">
+        <div className="workspace-selector" ref={workspaceMenuRef}>
+          <button onClick={() => setTeamMenu(!teamMenu)} aria-expanded={teamMenu} aria-label={"Workspace: " + workspace}>
+            <span className="workspace-icon">{workspace[0]?.toUpperCase() || "W"}</span>
             <span>
               {workspace}
               <small>Team workspace</small>
@@ -906,7 +976,7 @@ export default function Home() {
               </button>
               <button
                 onClick={() => {
-                  setModal("help");
+                  openPreferences();
                   setTeamMenu(false);
                 }}
               >
@@ -917,23 +987,25 @@ export default function Home() {
           )}
         </div>
         <p className="nav-label">WORKSPACE</p>
-        <nav>
+        <nav aria-label="Main navigation">
           {navItems.map((n) => (
             <button
               key={n.id}
               onClick={() => navigate(n.id)}
               className={page === n.id ? "active" : ""}
+              aria-current={page === n.id ? "page" : undefined}
+              title={n.label}
             >
               <n.icon size={19} strokeWidth={1.7} />
-              {n.label}
-              {n.id === "projects" && <span>{projects.length}</span>}
+              <span className="nav-item-label">{n.label}</span>
+              {n.id === "projects" && <span className="nav-count">{projects.length}</span>}
               {n.id === "team" && <span className="nav-team-dot" />}
             </button>
           ))}
         </nav>
         <div className="sidebar-projects">
           <div className="nav-label">
-            PINNED PROJECTS
+            RECENT PROJECTS
             <button
               title="Create project"
               aria-label="Create project"
@@ -950,6 +1022,7 @@ export default function Home() {
                 setActiveProject(p.id);
                 setPage("projects");
                 setProjectTab("Shortlist");
+                setSidebarOpen(false);
               }}
             >
               <i style={{ background: ["#7c9e73", "#d4ad75", "#9d9ac4"][i] }} />
@@ -957,26 +1030,16 @@ export default function Home() {
             </button>
           ))}
         </div>
+        </div>
         <div className="sidebar-bottom">
-          <div className="demo-card">
-            <span>
-              <FlaskConical size={14} /> EXPLORATION MODE
-            </span>
-            <p>
-              Big ideas.
-              <br />A safe place to test them.
-            </p>
-            <button onClick={() => setModal("data")}>
-              About the demo data
-              <ArrowUpRight size={13} />
-            </button>
-          </div>
-          <button className="help-button" onClick={() => setModal("help")}>
+          <button className="help-button data-info-button" aria-label="Sample data and methodology" title="About the sample data" onClick={() => setModal("data")}><FlaskConical size={17} /><span>Sample data & methodology</span></button>
+          <button className="help-button preferences-button" onClick={openPreferences} aria-label="Workspace preferences" title="Workspace preferences"><Settings size={17} /><span>Workspace preferences</span></button>
+          <button className="help-button" aria-label="Help & getting started" title="Help & getting started" onClick={() => setModal("help")}>
             <HelpCircle size={17} />
-            Help & getting started
+            <span>Help & getting started</span>
             <ArrowUpRight size={13} />
           </button>
-          <button className="user-profile" onClick={() => navigate("team")}>
+          <button className="user-profile" aria-label="Your profile and team" onClick={() => navigate("team")}>
             <Avatar name="You" color="#dce6d1" size={34} />
             <span>
               Alex Kumar<small>Workspace owner</small>
@@ -985,13 +1048,14 @@ export default function Home() {
           </button>
         </div>
       </aside>
-      <main className="main-shell">
+      <main className="main-shell" id="main-content" tabIndex={-1}>
         <header className="topbar">
           <div className="breadcrumbs">
             <button
               className="icon-button mobile-menu"
               onClick={() => setSidebarOpen(!sidebarOpen)}
               aria-label="Toggle navigation"
+              aria-expanded={sidebarOpen}
             >
               <List size={20} />
             </button>
@@ -1004,7 +1068,7 @@ export default function Home() {
                 <button
                   className="project-switch"
                   onClick={() => {
-                    setModal("save");
+                    setModal("switch-project");
                     setSaveTarget(activeProject);
                   }}
                 >
@@ -1032,11 +1096,12 @@ export default function Home() {
               <span>Search anything</span>
               <kbd>⌘ K</kbd>
             </button>
-            <div className="notification-wrap">
+            <div className="notification-wrap" ref={notificationRef}>
               <button
                 className="icon-button"
                 title="Notifications"
                 aria-label="Notifications"
+                aria-expanded={notifications}
                 onClick={() => setNotifications(!notifications)}
               >
                 <Bell size={18} />
@@ -1085,14 +1150,13 @@ export default function Home() {
               <div>
                 <div className="eyebrow">
                   <span className="live-dot" />
-                  FROM THE GROUND UP
+                  CROP & LAND EXPLORER
                 </div>
                 <h1>
-                  A better place to grow<span>.</span>
+                  {mode === "land" ? "Find your next growing location" : "Discover what your land can grow"}
                 </h1>
                 <p>
-                  Find the right land for your crop. Or the right crop for your
-                  land.
+                  Compare environmental fit, explore scenarios and build a shortlist.
                 </p>
               </div>
               <button
@@ -1110,12 +1174,13 @@ export default function Home() {
                 Save this search
               </button>
             </div>
-            <div className="query-panel">
+            <div className="query-panel" ref={filterRef}>
               <div className="query-mode">
                 <button
                   className={mode === "land" ? "active" : ""}
                   onClick={() => {
                     setMode("land");
+                    if(sort === "margin") setSort("fit");
                     setListSearch("");
                   }}
                 >
@@ -1126,8 +1191,10 @@ export default function Home() {
                   className={mode === "crops" ? "active" : ""}
                   onClick={() => {
                     setMode("crops");
+                    setMapSearch(null);
                     selectSite(land);
                     setListSearch("");
+                    if(sort === "yield") setSort("fit");
                   }}
                 >
                   <Leaf size={15} />
@@ -1141,7 +1208,7 @@ export default function Home() {
                       <span>CROP</span>
                       <div>
                         <Leaf size={17} />
-                        <select
+                        <SearchSelect
                           aria-label="Select crop"
                           value={context.crop}
                           onChange={(e) =>
@@ -1165,7 +1232,7 @@ export default function Home() {
                               {c.name}
                             </option>
                           ))}
-                        </select>
+                        </SearchSelect>
                       </div>
                     </label>
                     <div className="query-field region-field">
@@ -1195,7 +1262,7 @@ export default function Home() {
                   <span>GROWING SEASON</span>
                   <div>
                     <CalendarDays size={16} />
-                    <select
+                    <SearchSelect
                       aria-label="Growing season"
                       value={context.season}
                       onChange={(e) =>
@@ -1205,14 +1272,14 @@ export default function Home() {
                       <option>Main season</option>
                       <option>Kharif</option>
                       <option>Rabi</option>
-                    </select>
+                    </SearchSelect>
                   </div>
                 </label>
                 <label className="query-field water-field">
                   <span>WATER REGIME</span>
                   <div>
                     <Droplets size={16} />
-                    <select
+                    <SearchSelect
                       aria-label="Water regime"
                       value={context.water}
                       onChange={(e) =>
@@ -1221,7 +1288,7 @@ export default function Home() {
                     >
                       <option value="rainfed">Rainfed</option>
                       <option value="irrigated">Irrigated</option>
-                    </select>
+                    </SearchSelect>
                   </div>
                 </label>
                 <div className="query-filter">
@@ -1229,6 +1296,7 @@ export default function Home() {
                     className={
                       "button secondary " + (filters ? "selected" : "")
                     }
+                    aria-expanded={filters}
                     onClick={() => setFilters(!filters)}
                   >
                     <SlidersHorizontal size={16} />
@@ -1239,9 +1307,8 @@ export default function Home() {
                   </button>
                 </div>
               </div>
-            </div>
             {filters && (
-              <div className="filter-popover popover">
+              <div className="filter-popover popover" role="dialog" aria-label="Refine search filters">
                 <div className="section-heading">
                   <h3>Refine your search</h3>
                   <button
@@ -1290,7 +1357,7 @@ export default function Home() {
                 </label>
                 <label>
                   Water regime
-                  <select
+                  <SearchSelect
                     aria-label="Filter water regime"
                     value={context.water}
                     onChange={(e) =>
@@ -1299,16 +1366,12 @@ export default function Home() {
                   >
                     <option value="rainfed">Rainfed</option>
                     <option value="irrigated">Irrigated</option>
-                  </select>
+                  </SearchSelect>
                 </label>
                 <hr />
                 <button
                   className="text-button"
-                  onClick={() => {
-                    setMinFit(60);
-                    setLowWater(false);
-                    setVerified(false);
-                  }}
+                  onClick={resetFilters}
                 >
                   Reset filters
                 </button>
@@ -1321,7 +1384,9 @@ export default function Home() {
                 </button>
               </div>
             )}
-            <div className="context-line">
+            </div>
+            <div className="context-line" role="status" aria-live="polite">
+              {cellLoadError && <span className="load-warning"><Info size={13} />Cell detail unavailable · summaries still available<button onClick={() => setCellRetry((n) => n + 1)}>Retry</button></span>}
               <span>
                 <span className="live-dot" />
                 {isLoading
@@ -1342,11 +1407,7 @@ export default function Home() {
               {activeFilters > 0 && (
                 <button
                   className="clear-filters"
-                  onClick={() => {
-                    setMinFit(60);
-                    setLowWater(false);
-                    setVerified(false);
-                  }}
+                  onClick={resetFilters}
                 >
                   Clear {activeFilters} filters <X size={11} />
                 </button>
@@ -1387,7 +1448,7 @@ export default function Home() {
               {lens === "AEZ analogues" ? (
                 <label className="analogue-picker">
                   Similar environment to
-                  <select
+                  <SearchSelect
                     value={benchmark}
                     onChange={(e) => setBenchmark(e.target.value)}
                   >
@@ -1396,7 +1457,7 @@ export default function Home() {
                         {s.name}, {s.country}
                       </option>
                     ))}
-                  </select>
+                  </SearchSelect>
                 </label>
               ) : (
                 <span className="scope-note">
@@ -1435,7 +1496,7 @@ export default function Home() {
             </div>
             <div
               id="explore-map"
-              className={"explorer " + (selected ? "has-detail" : "")}
+              className={"explorer " + (selected ? "has-detail " : "") + (mapExpanded ? "map-expanded" : "")}
             >
               <aside className="results-panel">
                 <div className="results-heading">
@@ -1488,15 +1549,15 @@ export default function Home() {
                   </span>
                   <label>
                     Sort by{" "}
-                    <select
+                    <SearchSelect
                       aria-label="Sort results"
                       value={sort}
                       onChange={(e) => setSort(e.target.value)}
                     >
                       <option value="fit">Best fit</option>
                       <option value="water">Lowest water risk</option>
-                      <option value="yield">Highest yield</option>
-                    </select>
+                      {mode === "land" ? <option value="yield">Highest yield</option> : <option value="margin">Illustrative margin</option>}
+                    </SearchSelect>
                   </label>
                 </div>
                 <div className="results-search">
@@ -1529,6 +1590,8 @@ export default function Home() {
                               (selected === s.id ? "selected" : "")
                             }
                             key={s.id}
+                            onMouseEnter={()=>setMapHover(s.id)} onMouseLeave={()=>setMapHover(null)}
+                            onFocus={()=>setMapHover(s.id)} onBlur={()=>setMapHover(null)}
                           >
                             <button
                               className="result-card-main"
@@ -1604,6 +1667,8 @@ export default function Home() {
                             <div className="result-card-actions">
                               <button
                                 className={isCompared(s.id) ? "checked" : ""}
+                                aria-pressed={isCompared(s.id)}
+                                title={isCompared(s.id) ? "Remove from comparison shortlist" : "Add to comparison shortlist"}
                                 onClick={() =>
                                   toggleCompare({
                                     siteId: s.id,
@@ -1642,96 +1707,11 @@ export default function Home() {
                           </article>
                         );
                       })
-                    : rankedCrops.map(({ crop, record: o }, i) => (
-                        <article
-                          className={
-                            "result-card crop-result " +
-                            (context.crop === crop.id ? "selected" : "")
-                          }
-                          key={crop.id}
-                        >
-                          <button
-                            className="result-card-main"
-                            onClick={() => {
-                              setContext({ ...context, crop: crop.id });
-                              selectSite(land);
-                            }}
-                          >
-                            <div className="result-title">
-                              <span className="crop-symbol">
-                                {cropEmoji[crop.id]}
-                              </span>
-                              <div>
-                                <h3>{crop.name}</h3>
-                                <p>
-                                  {crop.category} · {crop.season}
-                                </p>
-                              </div>
-                              <span
-                                className={
-                                  "score " +
-                                  (o.suitability < 85 ? "moderate" : "")
-                                }
-                              >
-                                {Math.round(o.suitability)}
-                                <small>/100</small>
-                              </span>
-                            </div>
-                            <div className="result-match">
-                              <span className="status-dot" />
-                              {fitLabel(o.suitability)}
-                            </div>
-                            <div className="result-metrics">
-                              <div>
-                                <span>Potential yield</span>
-                                <strong>
-                                  {o.yieldRange.join("–")}
-                                  <small> t/ha</small>
-                                </strong>
-                              </div>
-                              <div>
-                                <span>Season match</span>
-                                <strong>
-                                  {crop.season === context.season ||
-                                  context.season === "Main season"
-                                    ? "Aligned"
-                                    : "Off-season"}
-                                </strong>
-                              </div>
-                            </div>
-                          </button>
-                          <div className="result-card-actions">
-                            <button
-                              className={
-                                isCompared(land, crop.id) ? "checked" : ""
-                              }
-                              onClick={() =>
-                                toggleCompare({
-                                  siteId: land,
-                                  cropId: crop.id,
-                                  context: { ...context, crop: crop.id },
-                                })
-                              }
-                            >
-                              {isCompared(land, crop.id) ? (
-                                <Check size={13} />
-                              ) : (
-                                <Plus size={13} />
-                              )}
-                              Compare
-                            </button>
-                            <button
-                              title="Inspect crop"
-                              onClick={() => {
-                                setCropDetail(crop.id);
-                                setModal("crop");
-                              }}
-                            >
-                              <Info size={14} />
-                            </button>
-                          </div>
-                        </article>
-                      ))}
+                    : <CropResults items={rankedCrops} site={getSite(land)} context={context} evidence={evidence} compared={comparison.filter(c=>c.siteId===land).map(c=>c.cropId)}
+                        onSelect={cropId=>{setContext({...context,crop:cropId});selectSite(land);}}
+                        onCompare={cropId=>toggleCompare({siteId:land,cropId,context:{...context,crop:cropId}})}
+                        onProfile={cropId=>{setCropDetail(cropId);setModal("crop");}} />}
+                  {mode === "crops" && rankedCrops.length > 0 && <p className="crop-screening-note">Ranked within this search context. Yield ranges describe different crop products and are not directly interchangeable.</p>}
                   {!(mode === "land"
                     ? rankedSites.length
                     : rankedCrops.length) && (
@@ -1753,17 +1733,11 @@ export default function Home() {
                     </Empty>
                   )}
                 </div>
-                <div className="results-footnote">
-                  <Info size={13} />
-                  <span>
-                    Screening supports a decision.
-                    <br />
-                    Local evidence makes it stronger.
-                  </span>
-                </div>
               </aside>
               <div className="map-workspace">
                 <ExplorerMap
+                  expanded={mapExpanded}
+                  onExpand={() => setMapExpanded(!mapExpanded)}
                   onCountry={chooseRegion}
                   context={
                     mode === "crops"
@@ -1771,6 +1745,13 @@ export default function Home() {
                       : context
                   }
                   sites={mode === "crops" ? [getSite(land)] : rankedSites}
+                  coverageSites={mode === "crops" ? [getSite(land)] : visibleSites}
+                  query={mode === "land" ? listSearch : ""}
+                  areaActive={mode === "land" && !!activeMapBounds}
+                  onBoundsSearch={mode === "land" ? bounds=>setMapSearch({region:context.region,bounds}) : undefined}
+                  onClearArea={()=>setMapSearch(null)} onResetFilters={resetFilters}
+                  onClearSelection={()=>{setSelected(null);setSelectedCell(null);}}
+                  onDrawCancel={()=>setDraw(false)} hovered={mapHover} onHover={setMapHover}
                   selected={selected}
                   onSelect={selectSite}
                   onCell={(id) => setSelectedCell(id)}
@@ -1800,13 +1781,6 @@ export default function Home() {
                     );
                   }}
                 />
-                {selected && (
-                  <a className="location-jump" href="#location-intelligence">
-                    <MapPin size={14} />
-                    <strong>{getSite(selected).name}</strong>
-                    <span>View intelligence below ↓</span>
-                  </a>
-                )}
                 <button
                   className={"draw-button " + (draw ? "active" : "")}
                   title="Select sampled locations by area"
@@ -1879,7 +1853,7 @@ export default function Home() {
                     ))}
                     <label>
                       Future climate scenario
-                      <select
+                      <SearchSelect
                         aria-label="Climate scenario"
                         value={context.scenario}
                         onChange={(e) =>
@@ -1893,7 +1867,7 @@ export default function Home() {
                         <option value="ssp585">
                           SSP5-8.5 · very high emissions
                         </option>
-                      </select>
+                      </SearchSelect>
                     </label>
                     <p className="caption">
                       A multi-year climate period is not a forecast for a
@@ -1918,50 +1892,18 @@ export default function Home() {
                   </div>
                 )}
               </div>
-
-              {comparison.length > 0 && (
-                <div className="compare-tray">
-                  <div className="tray-label">
-                    <GitCompareArrows size={18} />
-                    <span>
-                      Better, together
-                      <small>{comparison.length} of 3 candidates</small>
-                    </span>
-                  </div>
-                  <div className="tray-candidates">
-                    {comparison.map((c) => (
-                      <span key={c.siteId + c.cropId}>
-                        {getSite(c.siteId).name}
-                        {mode === "crops" && ` · ${getCrop(c.cropId).name}`}
-                        <button
-                          aria-label={`Remove ${getSite(c.siteId).name} ${getCrop(c.cropId).name}`}
-                          onClick={() => toggleCompare(c)}
-                        >
-                          <X size={12} />
-                        </button>
-                      </span>
-                    ))}
-                    {comparison.length < 2 && (
-                      <small>Add one more to compare</small>
-                    )}
-                  </div>
-                  <button
-                    className="text-button tray-clear"
-                    onClick={() => setComparison([])}
-                  >
-                    Clear
-                  </button>
-                  <button
-                    className="button primary"
-                    disabled={comparison.length < 2}
-                    onClick={() => setModal("compare")}
-                  >
-                    Compare {comparison.length}
-                    <ArrowRight size={15} />
-                  </button>
-                </div>
-              )}
             </div>
+            {comparison.length > 0 && (
+              <div className="compare-tray">
+                <div className="tray-label"><GitCompareArrows size={18}/><span>Comparison shortlist<small>{comparison.length} of 3 candidates</small></span></div>
+                <div className="tray-candidates">
+                  {comparison.map(c=><span key={c.siteId+c.cropId}>{getSite(c.siteId).name}{` · ${getCrop(c.cropId).name}`}<button aria-label={`Remove ${getSite(c.siteId).name} ${getCrop(c.cropId).name}`} onClick={()=>toggleCompare(c)}><X size={12}/></button></span>)}
+                  {comparison.length<2&&<small>Add one more to compare</small>}
+                </div>
+                <button className="text-button tray-clear" onClick={()=>setComparison([])}>Clear</button>
+                <button className="button primary" onClick={()=>navigate("compare")}>{comparison.length<2?'Choose another':`Compare ${comparison.length}`}<ArrowRight size={15}/></button>
+              </div>
+            )}
             <div id="location-intelligence" className="location-below">
               {selected && (
                 <Suspense
@@ -2000,7 +1942,7 @@ export default function Home() {
                       if (!isCompared(chosenCandidate.siteId, chosenCandidate.cropId)) {
                         setComparison((items) => [...items.slice(0, 2), chosenCandidate]);
                       }
-                      setModal("compare");
+                      navigate("compare");
                     }}
                     cropOpportunities={mode === "crops"}
                     onCompareCrop={(cropId) => toggleCompare({ siteId: selected, cropId, context: { ...context, crop: cropId } })}
@@ -2013,6 +1955,7 @@ export default function Home() {
                 </Suspense>
               )}
             </div>
+            {selected && <MarketIntelligence key={selected+context.crop} site={getSite(selected)} context={context} onEvidence={openEvidence}/> }
             <div className="explore-footer">
               <span>
                 <Shield size={12} />
@@ -2026,6 +1969,14 @@ export default function Home() {
           </div>
         )}
 
+        {page === "compare" && <div className="content-page compare-page"><button className="text-button compare-back" onClick={()=>navigate("explore")}><ArrowLeft size={15}/>Back to explorer</button><div className="page-heading"><div><div className="eyebrow">CANDIDATE WORKSPACE</div><h1>Compare possibilities</h1></div></div>
+          <ComparisonWorkspace candidates={comparison} context={context} initialSite={selected || land} evidence={evidence}
+            onAdd={(siteId,cropId) => toggleCompare({siteId,cropId,context:{...context,crop:cropId}})}
+            onRemove={toggleCompare}
+            onInspect={(candidate) => { setSelected(candidate.siteId); setContext({...candidate.context,crop:candidate.cropId,region:getSite(candidate.siteId).region}); setLand(candidate.siteId);navigate("explore");requestAnimationFrame(()=>document.getElementById("location-intelligence")?.scrollIntoView({behavior:"smooth"})); }}
+            onSave={(items) => addToProject(items,activeProject,true)} />
+        </div>}
+
         {page === "projects" && (
           <div className="content-page projects-page">
             {!detailedProject ? (
@@ -2034,10 +1985,10 @@ export default function Home() {
                   <div>
                     <div className="eyebrow">FROM EXPLORATION TO ACTION</div>
                     <h1>
-                      Good ideas take root here<span>.</span>
+                      Your projects
                     </h1>
                     <p>
-                      A shared home for your locations, scenarios and decisions.
+                      Keep candidates, scenarios, evidence and decisions together.
                     </p>
                   </div>
                   <button className="button primary" onClick={openProjectForm}>
@@ -2045,9 +1996,15 @@ export default function Home() {
                     New project
                   </button>
                 </div>
+                <SummaryStrip items={[
+                  {label:"Projects", value:projects.length, icon:FolderOpen},
+                  {label:"Shortlisted candidates", value:projects.reduce((n,p) => n + candidates(p).length,0),icon:MapPin},
+                  {label:"Saved scenarios", value:projects.reduce((n,p) => n + p.scenarios.length,0),icon:Layers},
+                  {label:"Ready for review", value:projects.filter((p) => p.status === "Review" || p.status === "Decided").length,icon:CheckCircle2},
+                ]} />
                 <div className="content-toolbar">
                   <div className="segmented">
-                    {["All projects", "In progress", "Planning", "Review"].map(
+                    {["All projects", "In progress", "Planning", "Review", "Decided"].map(
                       (s) => (
                         <button
                           key={s}
@@ -2062,24 +2019,12 @@ export default function Home() {
                       ),
                     )}
                   </div>
-                  <div className="search-box">
-                    <Search size={15} />
-                    <input
-                      aria-label="Search projects"
-                      placeholder="Search projects…"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                    />
-                  </div>
+                  <div className="toolbar-end"><FilterSelect label="Sort projects" value={projectSort} onChange={setProjectSort} options={[{value:"recent",label:"Newest first"},{value:"name",label:"Name A–Z"},{value:"candidates",label:"Most candidates"}]} /><SearchField label="Search projects" value={search} onChange={setSearch} /></div>
                 </div>
+                <div className="results-caption" role="status">{visibleProjects.length} of {projects.length} projects{search && ` matching “${search}”`}</div>
+                {!visibleProjects.length && <NoResults subject="projects" onReset={() => { setSearch(""); setProjectFilter("All projects"); }} />}
                 <div className="project-grid">
-                  {projects
-                    .filter(
-                      (p) =>
-                        (projectFilter === "All projects" ||
-                          p.status === projectFilter) &&
-                        matchesSearch(`${p.name} ${p.description} ${p.region} ${p.status}`, search),
-                    )
+                  {visibleProjects
                     .map((p, i) => (
                       <button
                         className="project-card"
@@ -2206,10 +2151,16 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
+                <SummaryStrip items={[
+                  {label:"Candidates",value:candidates(detailedProject).length,icon:MapPin},
+                  {label:"Scenarios",value:detailedProject.scenarios.length,icon:Layers},
+                  {label:"Evidence records",value:evidence.filter((e) => e.projectId === detailedProject.id).length,icon:Database},
+                  {label:"Decision notes",value:detailedProject.notes.length,icon:MessageSquare},
+                ]} />
                 <div className="project-meta">
                   <label>
                     Status
-                    <select
+                    <SearchSelect
                       aria-label="Project status"
                       value={detailedProject.status}
                       onChange={(e) =>
@@ -2235,7 +2186,7 @@ export default function Home() {
                           <option key={s}>{s}</option>
                         ),
                       )}
-                    </select>
+                    </SearchSelect>
                   </label>
                   <span>
                     <Avatar name={detailedProject.owner} size={24} />
@@ -2280,7 +2231,7 @@ export default function Home() {
                       <>
                         <div className="section-heading">
                           <div>
-                            <h2>A few places. A clearer decision.</h2>
+                            <h2>Candidate shortlist</h2>
                             <p className="body-muted">
                               Saved with their crop and search context. Select
                               two or three to compare.
@@ -2289,7 +2240,7 @@ export default function Home() {
                           <button
                             className="button secondary"
                             disabled={comparison.length < 2}
-                            onClick={() => setModal("compare")}
+                            onClick={() => navigate("compare")}
                           >
                             <GitCompareArrows size={15} />
                             Compare {comparison.length > 0 && comparison.length}
@@ -2438,6 +2389,7 @@ export default function Home() {
                 )}
                 {projectTab === "Scenarios" && (
                   <div className="scenario-list">
+                    <div className="section-heading"><div><h2>Saved scenarios</h2><p className="body-muted">Reopen a search with its climate and economic assumptions.</p></div><button className="button secondary" onClick={() => { setActiveProject(detailedProject.id); openScenario(); }}><Plus size={15} />Save current context</button></div>
                     {detailedProject.scenarios.length ? (
                       detailedProject.scenarios.map((s) => (
                         <div className="scenario-card" key={s.id}>
@@ -2477,6 +2429,7 @@ export default function Home() {
                             className="button secondary"
                             onClick={() => {
                               setContext(s.context);
+                              setLand(s.sites[0] || land);
                               setSelected(s.sites[0] || null);
                               setRestoredAssumptions(s.assumptions);
                               setRestoredScenario(s.id);
@@ -2573,7 +2526,7 @@ export default function Home() {
                           onChange={(e) => setNote(e.target.value)}
                           placeholder="What matters for this decision? What needs validation?"
                         />
-                        <button className="button primary">
+                        <button className="button primary" disabled={!note.trim()}>
                           Add note
                           <MessageSquare size={15} />
                         </button>
@@ -2592,7 +2545,7 @@ export default function Home() {
                       ))}
                     </div>
                     <aside className="decision-checklist">
-                      <h3>Before the next step</h3>
+                      <h3>Decision checklist</h3><span className="checklist-progress">{detailedProject.checklist?.length || 0} of 4 complete</span>
                       <p>A useful decision leaves a clear trail.</p>
                       {[
                         "Compare environmental fit",
@@ -2603,9 +2556,8 @@ export default function Home() {
                         <label key={s}>
                           <input
                             type="checkbox"
-                            defaultChecked={
-                              i === 0 && candidates(detailedProject).length >= 2
-                            }
+                            checked={detailedProject.checklist?.includes(s) || false}
+                            onChange={(e) => setProjects((ps) => ps.map((p) => p.id === detailedProject.id ? { ...p, checklist:e.target.checked ? [...(p.checklist || []),s] : (p.checklist || []).filter((item) => item !== s) } : p))}
                           />
                           {s}
                         </label>
@@ -2649,7 +2601,7 @@ export default function Home() {
               <div>
                 <div className="eyebrow">A WORLD OF GROWING POSSIBILITIES</div>
                 <h1>
-                  Every crop has a place<span>.</span>
+                  Crop library
                 </h1>
                 <p>
                   Start with the crop. Understand what it needs. Find where it
@@ -2670,24 +2622,12 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-              <div className="search-box">
-                <Search size={15} />
-                <input
-                  aria-label="Search crops"
-                  placeholder="Search crops…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
+              <div className="toolbar-end"><FilterSelect label="Sort crops" value={cropSort} onChange={setCropSort} options={[{value:"name",label:"Name A–Z"},{value:"season",label:"Growing season"}]} /><SearchField label="Search crops" value={search} onChange={setSearch} /></div>
             </div>
+            <div className="results-caption" role="status">{visibleCrops.length} of {db.crops.length} crops · Select a crop to view requirements and explore locations</div>
+            {!visibleCrops.length && <NoResults subject="crops" onReset={() => { setSearch(""); setCropCategory("All crops"); }} />}
             <div className="crop-grid">
-              {db.crops
-                .filter(
-                  (c) =>
-                    (cropCategory === "All crops" ||
-                      c.category === cropCategory) &&
-                    matchesSearch(`${c.name} ${c.scientificName} ${c.category}`, search),
-                )
+              {visibleCrops
                 .map((c) => (
                   <article
                     className={"crop-library-card crop-" + c.id}
@@ -2760,7 +2700,7 @@ export default function Home() {
               <div>
                 <div className="eyebrow">GROUND YOUR THINKING IN EVIDENCE</div>
                 <h1>
-                  From a match to confidence<span>.</span>
+                  Evidence library
                 </h1>
                 <p>
                   Bring local observations, trial results and soil tests into
@@ -2772,6 +2712,12 @@ export default function Home() {
                 Add evidence
               </button>
             </div>
+            <SummaryStrip items={[
+              {label:"Evidence records",value:evidence.length,icon:Database},
+              {label:"Locations covered",value:new Set(evidence.map((e) => e.locationId)).size,icon:MapPin},
+              {label:"Crops covered",value:new Set(evidence.map((e) => e.cropId)).size,icon:Leaf},
+              {label:"With observed yields",value:evidence.filter((e) => e.yield !== undefined).length,icon:CheckCircle2},
+            ]} />
             <div className="evidence-banner">
               <span className="source-icon">
                 <FlaskConical size={25} />
@@ -2788,23 +2734,15 @@ export default function Home() {
             </div>
             <div className="content-toolbar">
               <h2>
-                Team evidence <span className="muted">{evidence.length}</span>
+                Team evidence <span className="muted">{visibleEvidence.length}</span>
               </h2>
-              <div className="search-box">
-                <Search size={15} />
-                <input
-                  aria-label="Search evidence"
-                  placeholder="Search evidence…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
+              <div className="toolbar-end"><FilterSelect label="Evidence type" value={evidenceType} onChange={setEvidenceType} options={[{value:"all",label:"All evidence types"},...Array.from(new Set(evidence.map((e) => e.type))).map((type) => ({value:type,label:type}))]} /><FilterSelect label="Evidence crop" value={evidenceCrop} onChange={setEvidenceCrop} options={[{value:"all",label:"All crops"},...db.crops.map((c) => ({value:c.id,label:c.name}))]} /><SearchField label="Search evidence" value={search} onChange={setSearch} /></div>
               <button
                 className="button secondary"
                 onClick={() => {
                   download(
                     "croplocator-evidence.csv",
-                    csv(evidence as unknown as Record<string, unknown>[]),
+                    csv(visibleEvidence as unknown as Record<string, unknown>[]),
                     "text/csv",
                   );
                   notify("Team evidence exported.");
@@ -2827,10 +2765,8 @@ export default function Home() {
                   </tr>
                 </thead>
                 <tbody>
-                  {evidence
-                    .filter((e) =>
-                      matchesSearch(`${e.name} ${e.note} ${e.type} ${getSite(e.locationId).name} ${getCrop(e.cropId).name}`, search),
-                    )
+                  {!visibleEvidence.length && <tr><td colSpan={6}><NoResults subject="evidence records" onReset={() => { setSearch(""); setEvidenceType("all"); setEvidenceCrop("all"); }} /></td></tr>}
+                  {visibleEvidence
                     .map((e) => (
                       <tr key={e.id}>
                         <td>
@@ -2915,7 +2851,7 @@ export default function Home() {
               <div>
                 <div className="eyebrow">GROW BETTER, TOGETHER</div>
                 <h1>
-                  A shared view of what’s possible<span>.</span>
+                  Your team
                 </h1>
                 <p>
                   Give the right people the right context, with clear roles and
@@ -2953,17 +2889,9 @@ export default function Home() {
             </div>
             <div className="content-toolbar">
               <h2>
-                People <span className="muted">{members.length}</span>
+                People <span className="muted">{visibleMembers.length}</span>
               </h2>
-              <div className="search-box">
-                <Search size={15} />
-                <input
-                  aria-label="Search team"
-                  placeholder="Search people…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
+              <div className="toolbar-end"><FilterSelect label="Team role" value={teamRole} onChange={setTeamRole} options={[{value:"all",label:"All roles"},...["Owner","Admin","Analyst","Viewer"].map((role) => ({value:role,label:role}))]} /><FilterSelect label="Member status" value={teamStatus} onChange={setTeamStatus} options={[{value:"all",label:"All statuses"},{value:"Active",label:"Active"},{value:"Pending",label:"Pending"}]} /><SearchField label="Search team" value={search} onChange={setSearch} /></div>
             </div>
             <div className="table-wrap">
               <table>
@@ -2977,10 +2905,8 @@ export default function Home() {
                   </tr>
                 </thead>
                 <tbody>
-                  {members
-                    .filter((m) =>
-                      matchesSearch(`${m.name} ${m.email} ${m.role} ${m.scope} ${m.status}`, search),
-                    )
+                  {!visibleMembers.length && <tr><td colSpan={5}><NoResults subject="team members" onReset={() => { setSearch(""); setTeamRole("all"); setTeamStatus("all"); }} /></td></tr>}
+                  {visibleMembers
                     .map((m) => (
                       <tr key={m.id}>
                         <td>
@@ -2996,7 +2922,7 @@ export default function Home() {
                           {m.role === "Owner" ? (
                             <span className="pill neutral">Owner</span>
                           ) : (
-                            <select
+                            <SearchSelect
                               className="table-select"
                               aria-label={`Role for ${m.name}`}
                               value={m.role}
@@ -3021,14 +2947,14 @@ export default function Home() {
                               {["Admin", "Analyst", "Viewer"].map((r) => (
                                 <option key={r}>{r}</option>
                               ))}
-                            </select>
+                            </SearchSelect>
                           )}
                         </td>
                         <td>
                           {m.role === "Owner" ? (
                             "All projects"
                           ) : (
-                            <select
+                            <SearchSelect
                               className="table-select scope-select"
                               disabled={m.role === "Admin"}
                               aria-label={`Project access for ${m.name}`}
@@ -3050,7 +2976,7 @@ export default function Home() {
                                   {p.name}
                                 </option>
                               ))}
-                            </select>
+                            </SearchSelect>
                           )}
                         </td>
                         <td>
@@ -3131,9 +3057,19 @@ export default function Home() {
         )}
       </main>
 
+      {modal === "preferences" && (
+        <Modal title="Workspace preferences" subtitle="Personalise this workspace. Changes are saved in this browser." onClose={() => setModal(null)}>
+          <form onSubmit={(e) => { e.preventDefault(); if (!preferencesName.trim()) return; setWorkspace(preferencesName.trim()); setModal(null); notify("Workspace preferences saved."); }}>
+            <label>Workspace name<input autoFocus required maxLength={70} value={preferencesName} onChange={(e) => setPreferencesName(e.target.value)} /></label>
+            <fieldset className="preference-options"><legend>Display density</legend><p>Choose the amount of space around cards, tables and controls.</p><div className="choice-row">{["comfortable","compact"].map((value) => <button key={value} type="button" aria-pressed={density === value} className={density === value ? "selected" : ""} onClick={() => setDensity(value)}>{value === "comfortable" ? <LayoutGrid size={18} /> : <List size={18} />} {value === "comfortable" ? "Comfortable" : "Compact"}{density === value && <Check size={16} />}</button>)}</div></fieldset>
+            <div className="preference-note"><Shield size={18} /><span>Workspace data stays in this browser. Display preferences apply immediately.</span></div>
+            <div className="modal-footer"><button type="button" className="button secondary" onClick={() => setModal(null)}>Close</button><button className="button primary" disabled={!preferencesName.trim()}>Save workspace name<Check size={15} /></button></div>
+          </form>
+        </Modal>
+      )}
       {modal === "project" && (
         <Modal
-          title="Make room for a new decision"
+          title="Create a project"
           subtitle="Start simple. Add locations, scenarios and teammates as you go."
           onClose={() => setModal(null)}
         >
@@ -3151,7 +3087,7 @@ export default function Home() {
             </label>
             <label>
               Decision objective
-              <select
+              <SearchSelect
                 value={formGoal}
                 onChange={(e) => setFormGoal(e.target.value)}
               >
@@ -3165,7 +3101,7 @@ export default function Home() {
                 ].map((g) => (
                   <option key={g}>{g}</option>
                 ))}
-              </select>
+              </SearchSelect>
             </label>
             <label>
               A little context <span className="muted">(optional)</span>
@@ -3197,15 +3133,15 @@ export default function Home() {
           </form>
         </Modal>
       )}
-      {modal === "save" && (
+      {(modal === "save" || modal === "switch-project") && (
         <Modal
           title={
-            selected
-              ? "Keep this possibility close"
+            modal === "save"
+              ? "Save candidate to a project"
               : "Choose your active project"
           }
           subtitle={
-            selected
+            modal === "save" && selected
               ? `${getSite(selected).name} · ${getCrop(context.crop).name} · ${context.season}`
               : "New locations and saved searches will belong to this project."
           }
@@ -3241,14 +3177,14 @@ export default function Home() {
               className="button primary"
               onClick={() => {
                 setActiveProject(saveTarget);
-                if (selected) addToProject([chosenCandidate]);
+                if (modal === "save" && selected) addToProject([chosenCandidate]);
                 else {
                   setModal(null);
                   notify("Active project updated.");
                 }
               }}
             >
-              {selected ? "Save candidate" : "Use this project"}
+              {modal === "save" ? "Save candidate" : "Use this project"}
               <ArrowRight size={15} />
             </button>
           </div>
@@ -3256,7 +3192,7 @@ export default function Home() {
       )}
       {modal === "scenario" && (
         <Modal
-          title="Keep this what-if"
+          title="Save a scenario"
           subtitle="Save the exact search context and selected locations to a project."
           onClose={() => setModal(null)}
         >
@@ -3273,7 +3209,7 @@ export default function Home() {
             </label>
             <label>
               Project
-              <select
+              <SearchSelect
                 value={saveTarget}
                 onChange={(e) => setSaveTarget(e.target.value)}
               >
@@ -3282,7 +3218,7 @@ export default function Home() {
                     {p.name}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
             </label>
             <div className="scenario-summary">
               <span>
@@ -3323,281 +3259,9 @@ export default function Home() {
           </form>
         </Modal>
       )}
-      {modal === "compare" && (
-        <Modal
-          title="Compare crops and locations"
-          subtitle="Compare candidates under the same season, water and climate assumptions. All values are synthetic."
-          onClose={() => setModal(null)}
-          wide
-        >
-          <div className="comparison-context">
-            <span>
-              <CalendarDays size={14} />
-              {context.season}
-            </span>
-            <span>
-              <Droplets size={14} />
-              {context.water}
-            </span>
-            <span>
-              <Clock size={14} />
-              {db.periods.find((p) => p.id === context.period)?.range}
-            </span>
-            <select
-              aria-label="Compare climate period"
-              value={context.period}
-              onChange={(e) =>
-                setContext({ ...context, period: e.target.value })
-              }
-            >
-              {db.periods.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="comparison-picker">
-            <label>Add a candidate
-              <select aria-label="Add comparison candidate" value="" disabled={comparison.length >= 3}
-                onChange={(e) => {
-                  const [siteId, cropId] = e.target.value.split(":");
-                  toggleCompare({ siteId, cropId, context: { ...context, crop: cropId } });
-                }}>
-                <option value="">Choose a location and crop…</option>
-                {(mode === "crops" ? [getSite(land)] : db.locations).map((site) => (
-                  <optgroup key={site.id} label={`${site.name}, ${site.country}`}>
-                    {db.crops.filter((crop) => !isCompared(site.id, crop.id)).map((crop) => (
-                      <option key={crop.id} value={`${site.id}:${crop.id}`}>{site.name} · {crop.name}</option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            </label>
-            <span>{comparison.length}/3 selected · {comparison.length < 2 ? "Add a second candidate to compare side by side." : "Compare under the current growing context."}</span>
-          </div>
-          <div className="segmented compare-tabs">
-            {["Fit & climate", "Commercial outlook", "Evidence"].map((t) => (
-              <button
-                key={t}
-                className={compareTab === t ? "active" : ""}
-                onClick={() => setCompareTab(t)}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-          <div
-            className="comparison-grid"
-            style={{
-              gridTemplateColumns: `repeat(${comparison.length},minmax(0,1fr))`,
-            }}
-          >
-            {comparison.map((c, i) => {
-              const s = getSite(c.siteId),
-                o = getRecord(c.siteId, context, c.cropId);
-              return (
-                <div className="comparison-column" key={c.siteId + c.cropId}>
-                  <div className="comparison-location">
-                    <span className="eyebrow">CANDIDATE 0{i + 1}</span>
-                    <h3>{s.name}</h3>
-                    <p>
-                      {getCrop(c.cropId).name} · {s.aezId}
-                    </p>
-                    <button
-                      className="icon-button"
-                      title="Remove candidate"
-                      onClick={() => {
-                        toggleCompare(c);
-
-                      }}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                  {compareTab === "Fit & climate" ? (
-                    <>
-                      <div className="comparison-fit">
-                        <strong>
-                          {Math.round(o.suitability)}
-                          <small>/100</small>
-                        </strong>
-                        <span className="pill green">
-                          {fitLabel(o.suitability)}
-                        </span>
-                        <div>
-                          <i style={{ width: o.suitability + "%" }} />
-                        </div>
-                      </div>
-                      <dl className="data-list">
-                        <div>
-                          <dt>Confidence</dt>
-                          <dd>{Math.round(o.confidence)}%</dd>
-                        </div>
-                        <div>
-                          <dt>Potential yield</dt>
-                          <dd>{o.yieldRange.join("–")} t/ha</dd>
-                        </div>
-                        <div>
-                          <dt>Annual rainfall</dt>
-                          <dd>{Math.round(o.annualRainfallMm)} mm</dd>
-                        </div>
-                        <div>
-                          <dt>Mean temperature</dt>
-                          <dd>{o.meanTemperatureC} °C</dd>
-                        </div>
-                        <div>
-                          <dt>Drought index</dt>
-                          <dd>{Math.round(o.droughtRisk)}/100</dd>
-                        </div>
-                        <div>
-                          <dt>Heat stress index</dt>
-                          <dd>{Math.round(o.heatRisk)}/100</dd>
-                        </div>
-                      </dl>
-                    </>
-                  ) : compareTab === "Commercial outlook" ? (
-                    <>
-                      <div className="comparison-fit">
-                        <small>Illustrative gross margin / ha</small>
-                        <strong className="margin-value">
-                          {money(
-                            o.yieldTHa * o.priceINRTonne -
-                              o.inputCostINRHa -
-                              6500,
-                          )}
-                        </strong>
-                      </div>
-                      <dl className="data-list">
-                        <div>
-                          <dt>Price / tonne</dt>
-                          <dd>{money(o.priceINRTonne)}</dd>
-                        </div>
-                        <div>
-                          <dt>Input cost / ha</dt>
-                          <dd>{money(o.inputCostINRHa)}</dd>
-                        </div>
-                        <div>
-                          <dt>Logistics / ha</dt>
-                          <dd>₹6,500</dd>
-                        </div>
-                        <div>
-                          <dt>Processor count</dt>
-                          <dd>{s.processorCount}</dd>
-                        </div>
-                        <div>
-                          <dt>Nearest road</dt>
-                          <dd>{s.roadKm} km</dd>
-                        </div>
-                        <div>
-                          <dt>Break-even yield</dt>
-                          <dd>
-                            {(
-                              (o.inputCostINRHa + 6500) /
-                              o.priceINRTonne
-                            ).toFixed(2)}{" "}
-                            t/ha
-                          </dd>
-                        </div>
-                      </dl>
-                      <p className="caption">
-                        Excludes rent, finance, taxes and switching costs. All
-                        prices and costs are synthetic.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <dl className="data-list">
-                        <div>
-                          <dt>Sample coverage</dt>
-                          <dd>36 km²</dd>
-                        </div>
-                        <div>
-                          <dt>Resolution</dt>
-                          <dd>1 × 1 km</dd>
-                        </div>
-                        <div>
-                          <dt>Model</dt>
-                          <dd>demo-1.0</dd>
-                        </div>
-                        <div>
-                          <dt>Team records</dt>
-                          <dd>
-                            {
-                              evidence.filter(
-                                (e) =>
-                                  e.locationId === s.id &&
-                                  e.cropId === c.cropId,
-                              ).length
-                            }
-                          </dd>
-                        </div>
-                      </dl>
-                      <p className="body-muted">
-                        Synthetic model data with separately attached demo
-                        observations. Not field validation.
-                      </p>
-                      {evidence
-                        .filter(
-                          (e) => e.locationId === s.id && e.cropId === c.cropId,
-                        )
-                        .map((e) => (
-                          <div className="compare-evidence" key={e.id}>
-                            <FileText size={15} />
-                            {e.name}
-                          </div>
-                        ))}
-                    </>
-                  )}
-                  <button
-                    className="button secondary full"
-                    onClick={() => {
-                      setSelected(c.siteId);
-                      setContext({
-                        ...context,
-                        crop: c.cropId,
-                        region: s.region,
-                      });
-                      setPage("explore");
-                      setModal(null);
-                    }}
-                  >
-                    Inspect location
-                    <ArrowUpRight size={14} />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-          <div className="modal-footer">
-            <button
-              className="button secondary"
-              onClick={() => exportRows(comparison)}
-            >
-              <Download size={15} />
-              Export comparison
-            </button>
-            <button
-              className="button primary"
-              onClick={() =>
-                addToProject(
-                  comparison.map((c) => ({
-                    ...c,
-                    context: { ...context, crop: c.cropId },
-                  })),
-                  activeProject,
-                )
-              }
-            >
-              <Bookmark size={15} />
-              Save to active project
-            </button>
-          </div>
-        </Modal>
-      )}
       {modal === "invite" && (
         <Modal
-          title="Good decisions have good company."
+          title="Invite a teammate"
           subtitle="Create a simulated invitation with a clear role and project scope."
           onClose={() => setModal(null)}
         >
@@ -3616,7 +3280,7 @@ export default function Home() {
             <div className="form-grid">
               <label>
                 Role
-                <select
+                <SearchSelect
                   value={formRole}
                   onChange={(e) => {
                     setFormRole(e.target.value);
@@ -3627,11 +3291,11 @@ export default function Home() {
                   <option>Analyst</option>
                   <option>Viewer</option>
                   <option>Admin</option>
-                </select>
+                </SearchSelect>
               </label>
               <label>
                 Project access
-                <select
+                <SearchSelect
                   disabled={formRole === "Admin"}
                   value={formScope}
                   onChange={(e) => setFormScope(e.target.value)}
@@ -3642,7 +3306,7 @@ export default function Home() {
                       {p.name}
                     </option>
                   ))}
-                </select>
+                </SearchSelect>
               </label>
             </div>
             <div className="role-explainer">
@@ -3680,7 +3344,7 @@ export default function Home() {
       )}
       {modal === "evidence" && (
         <Modal
-          title="Add a little ground truth"
+          title="Add evidence"
           subtitle="Attach a local observation to a crop and location. Keep its provenance clear."
           onClose={() => setModal(null)}
         >
@@ -3698,7 +3362,7 @@ export default function Home() {
             <div className="form-grid">
               <label>
                 Location
-                <select
+                <SearchSelect
                   value={formSite}
                   onChange={(e) => setFormSite(e.target.value)}
                 >
@@ -3707,11 +3371,11 @@ export default function Home() {
                       {s.name}
                     </option>
                   ))}
-                </select>
+                </SearchSelect>
               </label>
               <label>
                 Crop
-                <select
+                <SearchSelect
                   value={formCrop}
                   onChange={(e) => setFormCrop(e.target.value)}
                 >
@@ -3720,11 +3384,11 @@ export default function Home() {
                       {c.name}
                     </option>
                   ))}
-                </select>
+                </SearchSelect>
               </label>
               <label>
                 Evidence type
-                <select
+                <SearchSelect
                   value={formType}
                   onChange={(e) => setFormType(e.target.value)}
                 >
@@ -3737,7 +3401,7 @@ export default function Home() {
                   ].map((t) => (
                     <option key={t}>{t}</option>
                   ))}
-                </select>
+                </SearchSelect>
               </label>
               <label>
                 Observation date
@@ -3828,22 +3492,10 @@ export default function Home() {
       )}
       {modal === "command" && (
         <Modal
-          title="Where would you like to go?"
+          title="Search your workspace"
           onClose={() => setModal(null)}
         >
-          <div className="command-search">
-            <Search size={20} />
-            <input
-              autoFocus
-              aria-label="Search workspace"
-              placeholder="Projects, crops, locations, actions…"
-              value={commandQuery}
-              onChange={(e) => setCommandQuery(e.target.value)}
-            />
-            <kbd>ESC</kbd>
-          </div>
-          <div className="command-results">
-            {[
+          <CommandMenu query={commandQuery} onQuery={setCommandQuery} items={[
               {
                 label: "Explore the map",
                 sub: "Workspace",
@@ -3871,6 +3523,8 @@ export default function Home() {
                 icon: Database,
                 action: openEvidence,
               },
+              ...navItems.filter((n) => n.id !== "explore").map((n) => ({label:n.label,sub:"Page",icon:n.icon,action:() => navigate(n.id)})),
+              {label:"Workspace preferences",sub:"Settings",icon:Settings,action:openPreferences},
               ...projects.map((p) => ({
                 label: p.name,
                 sub: "Project",
@@ -3893,7 +3547,7 @@ export default function Home() {
               })),
               ...db.locations.map((s) => ({
                 label: s.name,
-                sub: s.region,
+                sub: `${s.region} · ${s.country} · Location`,
                 icon: MapPin,
                 action: () => {
                   setContext({ ...context, region: s.region });
@@ -3902,19 +3556,7 @@ export default function Home() {
                   setModal(null);
                 },
               })),
-            ]
-              .filter((a) =>
-                matchesSearch(a.label + " " + a.sub, commandQuery),
-              )
-              .map((a) => (
-                <button key={a.label} onClick={a.action}>
-                  <a.icon size={17} />
-                  <span>{a.label}</span>
-                  <small>{a.sub}</small>
-                  <ArrowUpRight size={13} />
-                </button>
-              ))}
-          </div>
+            ]} />
         </Modal>
       )}
       {modal === "crop" && (
@@ -4076,7 +3718,7 @@ export default function Home() {
       )}
       {modal === "help" && (
         <Modal
-          title="A good place to start."
+          title="Help & getting started"
           subtitle="A few simple steps from exploration to a shared decision."
           onClose={() => setModal(null)}
         >
@@ -4112,18 +3754,7 @@ export default function Home() {
               </div>
             ))}
           </div>
-          <label>
-            Workspace name
-            <input
-              value={workspace}
-              onChange={(e) => setWorkspace(e.target.value)}
-              maxLength={70}
-            />
-          </label>
-          <p className="caption">
-            Changes persist in this browser. Keyboard shortcut: ⌘ / Ctrl + K to
-            search.
-          </p>
+          <div className="shortcut-reference"><span><kbd>⌘ / Ctrl K</kbd> Search workspace</span><span><kbd>⌘ / Ctrl Z</kbd> Undo</span><span><kbd>⌘ / Ctrl Shift Z</kbd> Redo</span><span><kbd>Esc</kbd> Close dialog or popover</span></div>
           <div className="modal-footer">
             <button
               className="button secondary"

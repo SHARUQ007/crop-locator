@@ -36,6 +36,8 @@ global.window = dom.window;
 global.document = dom.window.document;
 global.HTMLElement = dom.window.HTMLElement;
 global.HTMLInputElement = dom.window.HTMLInputElement;
+global.HTMLSelectElement = dom.window.HTMLSelectElement;
+global.Node = dom.window.Node;
 global.Event = dom.window.Event;
 global.MouseEvent = dom.window.MouseEvent;
 global.localStorage = dom.window.localStorage;
@@ -128,37 +130,41 @@ function label(name) {
     null,
     "details must not occupy the map container",
   );
+  assert.ok(document.querySelector(".market-intelligence-section"), "market intelligence appears below location intelligence");
   await click(button("Compare details"));
-  assert.ok(document.querySelector("dialog[open]"), "detail Compare must open immediately");
+  assert.ok(document.querySelector(".compare-page"), "detail Compare opens the dedicated page");
+  assert.equal(document.querySelector("dialog[open]"), null, "comparison is not a modal");
   assert.equal(document.querySelectorAll(".comparison-column").length, 1);
   const candidatePicker = document.querySelector('[aria-label="Add comparison candidate"]');
-  await input(candidatePicker, [...candidatePicker.options].find((o) => o.value).value);
+  const cropSelect = candidatePicker.querySelector("select");
+  await input(cropSelect, [...cropSelect.options].find((o) => o.value !== cropSelect.value).value);
+  await click([...candidatePicker.querySelectorAll("button")].find(b => b.textContent.includes("Add candidate")));
   assert.equal(document.querySelectorAll(".comparison-column").length, 2);
-  await click(document.querySelector('button[aria-label="Close dialog"]'));
+  await click(button("Back to explorer"));
   await click(document.querySelector('[aria-label="Undo"]'));
   await click(button("Compare details"));
   assert.equal(document.querySelectorAll(".comparison-column").length, 1, "undo removes the second candidate");
-  await click(document.querySelector('button[aria-label="Close dialog"]'));
+  await click(button("Back to explorer"));
   await click(document.querySelector('[aria-label="Redo"]'));
   await click(button("Compare details"));
   assert.equal(document.querySelectorAll(".comparison-column").length, 2, "redo restores second candidate");
-  await click(document.querySelector('button[aria-label="Close dialog"]'));
+  await click(button("Back to explorer"));
   await click(document.querySelector(".tray-clear"));
-  const compares = buttons().filter((b) => b.textContent.trim() === "Compare");
+  const compares = [...document.querySelectorAll(".result-card-actions button")].filter((b) => b.textContent.trim() === "Compare");
   await click(compares[0]);
   await click(compares[1]);
   await click(button("Compare 2"));
   assert.ok(
-    document.querySelector("dialog[open]"),
-    "comparison dialog must open",
+    document.querySelector(".compare-page"),
+    "comparison page must open",
   );
   assert.equal(document.querySelectorAll(".comparison-column").length, 2);
   await click(button("Commercial outlook"));
   assert.match(
-    document.querySelector("dialog").textContent,
+    document.querySelector(".compare-page").textContent,
     /Break-even yield/,
   );
-  await click(document.querySelector('button[aria-label="Close dialog"]'));
+  await click(button("Back to explorer"));
   await click(document.querySelector('button[aria-label="Create project"]'));
   await input(label("Project name"), "Test sourcing decision");
   await submit(document.querySelector("dialog form"));
@@ -219,25 +225,48 @@ function label(name) {
   await act(async () => app.unmount());
   localStorage.clear();
   await render();
-  assert.match(document.querySelector("h1").textContent, /Good decisions/);
-  await click(button("Continue"));
-  await input(label("First project"), "Onboarded decision");
+  assert.match(document.querySelector("h1").textContent, /What brings you here/);
+  assert.equal(document.querySelectorAll('.setup-focus-grid button').length, 6, 'work focus starts with six choices');
   await click(button("Continue"));
   await click(document.querySelector(".location-picker-trigger"));
-  await click(
-    [...document.querySelectorAll(".picker-options button")].find((b) =>
-      b.textContent.startsWith("India"),
-    ),
-  );
+  await click([...document.querySelectorAll(".picker-options button")].find((b) => b.textContent.startsWith("India")));
+  await click(button("Continue"));
+  await input(label("First project"), "Onboarded decision");
   await click(button("Open my workspace"));
   assert.equal(localStorage.getItem("cl-onboarded-v1"), "true");
   assert.equal(
     JSON.parse(localStorage.getItem("cl-projects-v1"))[0].name,
     "Onboarded decision",
   );
+  const cropTrigger = document.querySelector('button[aria-label="Select crop"]');
+  await click(cropTrigger);
+  const optionSearch = document.querySelector('.select-search input');
+  await input(optionSearch, "maize");
+  assert.equal(document.querySelectorAll('.select-options [role="option"]').length, 1, "custom dropdown filters options");
+  await click(document.querySelector('.select-options [role="option"]'));
+  assert.equal(document.querySelector('select[aria-label="Select crop"]').value, "maize", "custom option updates context");
+  assert.equal(document.querySelector('.select-popup'), null, "custom dropdown closes on selection");
+  await click(cropTrigger);
+  await input(document.querySelector('.select-search input'), "cotton");
+  await click(document.querySelector('.select-options [role="option"]'));
+
+  await click(document.querySelector('[aria-label="Collapse sidebar"]'));
+  assert.ok(document.querySelector('.app-shell.nav-compact'), "collapse activates rail layout");
+  assert.equal(localStorage.getItem('cl-nav-compact-v1'), 'true', "sidebar preference persists");
+  await click(document.querySelector('[aria-label="Expand sidebar"]'));
+  assert.equal(document.querySelector('.app-shell.nav-compact'), null, "expand restores full sidebar");
+  assert.equal(document.querySelectorAll('.sidebar nav .nav-item-label').length, 6, "all navigation labels have dedicated styles");
+  await click(document.querySelector('[aria-label="Toggle navigation"]'));
+  assert.equal(document.querySelector('.sidebar').getAttribute('aria-modal'), 'true', "drawer exposes dialog semantics");
+  assert.equal(document.body.style.overflow, 'hidden', "drawer prevents background scroll");
+  await click(document.querySelector('.sidebar nav button[title="Crop library"]'));
+  assert.equal(document.querySelector('.sidebar.mobile-open'), null, "navigation closes drawer");
+  assert.equal(document.body.style.overflow, '', "closing drawer restores page scrolling");
+  assert.match(document.querySelector('h1').textContent, /Crop library/);
+  await click(document.querySelector('.sidebar nav button[title="Explore"]'));
   await act(async () => app.unmount());
   console.log(
-    "PASS: undo/redo for exploration and persisted project edits, redo branch reset, detail comparison picker, token-based sample search, below-map detail placement, two-candidate comparison dialog, economic comparison, project creation/persistence, simulated invitations, evidence creation, crop discovery, time context and complete onboarding, searchable location picker and global discovery. Map rendering itself is covered by manual browser review.",
+    "PASS: undo/redo for exploration and persisted project edits, redo branch reset, detail comparison picker, token-based sample search, below-map intelligence and market placement, dedicated comparison page, economic comparison, project creation/persistence, simulated invitations, evidence creation, crop discovery, time context and complete onboarding, searchable location picker and global discovery. Sidebar collapse, persisted preference, mobile drawer semantics and scroll restoration verified. Custom dropdown filtering and selection verified; map rendering requires browser verification.",
   );
   process.exit(0);
 })().catch((e) => {

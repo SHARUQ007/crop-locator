@@ -1,0 +1,14 @@
+"use client";
+import { ArrowUpRight, Check, Plus, Leaf, Info } from "lucide-react";
+import { type Context, type Crop, type Observation, type Evidence, type Site, fitLabel } from "../lib/model";
+export default function CropResults({items,site,context,evidence,compared,onSelect,onCompare,onProfile,onView}:{items:{crop:Crop;record:Observation}[];site:Site;context:Context;evidence:Evidence[];compared:string[];onSelect:(id:string)=>void;onCompare:(id:string)=>void;onProfile?:(id:string)=>void;onView?:(id:string)=>void}) {
+  return <>{items.map(({crop,record:o},index)=>{
+    const selected=crop.id===context.crop, added=compared.includes(crop.id),season=crop.season===context.season||context.season==='Main season';
+    const records=evidence.filter(e=>e.locationId===site.id&&e.cropId===crop.id).length;
+    const water=o.droughtRisk<30?'Low':o.droughtRisk<60?'Moderate':'High';
+    return <article className={'crop-discovery-card crop-result '+(selected?'selected':'')} key={crop.id}>
+      <button className="crop-discovery-main" aria-pressed={selected} aria-label={`Select ${crop.name}, environmental fit ${Math.round(o.suitability)} of 100`} onClick={()=>onSelect(crop.id)}><div className="crop-discovery-heading"><span className="crop-rank">{String(index+1).padStart(2,'0')}</span><span className="crop-discovery-name"><strong>{crop.name}</strong><small>{crop.category} · {crop.season}</small></span><span className="crop-fit-value">{Math.round(o.suitability)}<small>/100</small></span></div><div className="crop-fit-track"><i style={{width:o.suitability+'%'}}/></div><div className="crop-fit-caption"><span>{fitLabel(o.suitability)}</span>{selected&&<span><Check size={11}/>Analysing</span>}</div><div className="crop-discovery-metrics"><span><small>Potential yield</small><strong>{o.yieldRange.join('–')} <em>t/ha</em></strong></span><span><small>Drought exposure</small><strong className={o.droughtRisk>=60?'crop-risk-high':''}>{water}<em>{Math.round(o.droughtRisk)}/100</em></strong></span></div><div className="crop-validation-line"><span className={season?'season-aligned':'season-review'}>{season?'Season aligned':'Review season'}</span><span>{records?`${records} team ${records===1?'record':'records'}`:'Field evidence needed'}</span></div></button>
+      <div className="crop-discovery-actions"><button aria-pressed={added} className={added?'added':''} onClick={()=>onCompare(crop.id)}>{added?<Check size={14}/>:<Plus size={14}/>}Compare</button>{onProfile&&<button className="crop-profile-link" aria-label={`View ${crop.name} requirements`} title="Crop requirements" onClick={()=>onProfile(crop.id)}><Info size={14}/></button>}<button className="crop-open-intelligence" onClick={()=>{if(onView)onView(crop.id);else onSelect(crop.id);requestAnimationFrame(()=>document.getElementById('location-intelligence')?.scrollIntoView({behavior:'smooth',block:'start'}));}}>View intelligence<ArrowUpRight size={13}/></button></div>
+    </article>;
+  })}</>;
+}
