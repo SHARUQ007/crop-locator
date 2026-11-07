@@ -8123,3 +8123,60 @@ html {
   color: #416b46;
   font-size: 13px;
 }
+
+/* Defined surfaces and a stable, roomy exploration workspace. */
+:root { --ink: #172d25; --muted: #496052; --line: #b8c9bd; --green: #12583d; --green-dark: #093b2a; --amber: #9c5b0b; }
+.sidebar { background: #e7eee9; border-right-color: #b4c5ba; }
+.sidebar nav button { color: #385346; }
+.sidebar nav button.active { color: #fff; background: #164c37; }
+.sidebar nav button.active::before { background: #e2b754; }
+.sidebar nav button:hover:not(.active) { background: #d2e0d6; color: #173d2b; }
+.location-below .fit-summary { background: #143e30; border-color: #143e30; color: #fff; }
+.location-below .fit-summary h3, .location-below .fit-summary p, .location-below .fit-summary strong { color: #fff; }
+.location-below .fit-summary .fit-ring { color: #fff; background: conic-gradient(#e3b655 var(--fit), #426958 0); }
+.location-below .fit-summary .fit-ring::before { background: #143e30; }
+.leaflet-tile-pane { filter: saturate(.85) contrast(1.06); }
+.explorer, .explorer.has-detail { height: clamp(580px, 72dvh, 850px); min-height: 580px; max-height: 850px; transition: none; }
+.explorer .results-panel, .explorer.has-detail .results-panel { width: clamp(310px, 28%, 390px); height: auto; }
+.explorer.has-detail .results-heading p { display: block; }
+.result-card { border-color: #bdcdc1; }
+.result-card.selected { background: #e0eee5; border-color: #277051; }
+.score.moderate { color: #8b530b; background: #f8e9ce; }
+.history-controls { display: flex; gap: 3px; border: 1px solid #b8c9bd; padding: 2px; border-radius: 7px; background: #fff; }
+button:disabled { cursor: default; opacity: .4; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #137c72; outline-offset: 3px; }
+.comparison-picker { display: flex; gap: 18px; align-items: end; padding: 16px 0; }
+.comparison-picker label { display: grid; gap: 7px; font-size: 12px; font-weight: 600; flex: 1; }
+.comparison-picker select { width: 100%; min-width: 0; padding: 11px; border: 1px solid #9fb8a9; border-radius: 6px; background: #fff; }
+.comparison-picker > span { max-width: 230px; font-size: 12px; line-height: 1.6; color: #496052; }
+.crop-opportunities { padding: 22px 26px; background: #f4f8f5; border-block: 1px solid #b8c9bd; }
+.opportunity-heading { display: flex; justify-content: space-between; align-items: start; gap: 15px; margin-bottom: 16px; }
+.opportunity-heading h3 { font-size: 18px; color: #143e30; margin: 0 0 6px; }
+.opportunity-heading p { font-size: 12px; color: #496052; margin: 0; }
+.opportunity-heading > span { font-size: 10px; color: #82500d; background: #f6e8cb; padding: 6px 9px; border-radius: 5px; white-space: nowrap; }
+.opportunity-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.opportunity-card { background: #fff; border: 1px solid #b8c9bd; border-radius: 8px; overflow: hidden; }
+.opportunity-card.active { border-color: #126248; box-shadow: 0 0 0 1px #126248; }
+.opportunity-select { display: grid; gap: 9px; padding: 15px; width: 100%; text-align: left; }
+.opportunity-select > strong { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 14px; color: #164c37; }
+.opportunity-select strong > span { font-size: 20px; }
+.opportunity-select strong small { font-size: 10px; font-weight: 400; }
+.opportunity-select > span { color: #086a63; font-size: 12px; }
+.opportunity-select > small { font-size: 11px; color: #496052; }
+.opportunity-card > .text-button { margin: 0 15px 14px; font-size: 11px; }
+@media (max-width: 1100px) and (min-width: 761px) {
+  .explorer .results-panel, .explorer.has-detail .results-panel { width: 300px; }
+  .opportunity-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 760px) {
+  .explorer, .explorer.has-detail { height: 830px; min-height: 830px; max-height: none; }
+  .explorer .results-panel, .explorer.has-detail .results-panel { width: 100%; height: 300px; flex: 0 0 300px; }
+  .explorer .map-workspace, .explorer.has-detail .map-workspace { min-height: 460px; flex: 1; }
+  .crop-opportunities { padding: 18px 14px; }
+  .opportunity-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .opportunity-heading { flex-wrap: wrap; }
+  .comparison-picker { flex-direction: column; align-items: stretch; }
+  .comparison-picker > span { max-width: none; }
+  .topbar-actions { gap: 6px; }
+}
+@media (max-width: 420px) { .opportunity-grid { grid-template-columns: 1fr; } }

@@ -128,6 +128,22 @@ function label(name) {
     null,
     "details must not occupy the map container",
   );
+  await click(button("Compare details"));
+  assert.ok(document.querySelector("dialog[open]"), "detail Compare must open immediately");
+  assert.equal(document.querySelectorAll(".comparison-column").length, 1);
+  const candidatePicker = document.querySelector('[aria-label="Add comparison candidate"]');
+  await input(candidatePicker, [...candidatePicker.options].find((o) => o.value).value);
+  assert.equal(document.querySelectorAll(".comparison-column").length, 2);
+  await click(document.querySelector('button[aria-label="Close dialog"]'));
+  await click(document.querySelector('[aria-label="Undo"]'));
+  await click(button("Compare details"));
+  assert.equal(document.querySelectorAll(".comparison-column").length, 1, "undo removes the second candidate");
+  await click(document.querySelector('button[aria-label="Close dialog"]'));
+  await click(document.querySelector('[aria-label="Redo"]'));
+  await click(button("Compare details"));
+  assert.equal(document.querySelectorAll(".comparison-column").length, 2, "redo restores second candidate");
+  await click(document.querySelector('button[aria-label="Close dialog"]'));
+  await click(document.querySelector(".tray-clear"));
   const compares = buttons().filter((b) => b.textContent.trim() === "Compare");
   await click(compares[0]);
   await click(compares[1]);
@@ -151,6 +167,10 @@ function label(name) {
     /Test sourcing decision/,
   );
   assert.equal(JSON.parse(localStorage.getItem("cl-projects-v1")).length, 4);
+  await click(document.querySelector('[aria-label="Undo"]'));
+  assert.equal(JSON.parse(localStorage.getItem("cl-projects-v1")).length, 3, "undo persists project removal");
+  await click(document.querySelector('[aria-label="Redo"]'));
+  assert.equal(JSON.parse(localStorage.getItem("cl-projects-v1")).length, 4, "redo persists project restoration");
   await click(button("Team"));
   await click(button("Invite teammate"));
   await input(label("Work email"), "qa@example.test");
@@ -171,6 +191,19 @@ function label(name) {
   await click(button("Explore"));
   await click(button("Find crops"));
   assert.equal(document.querySelectorAll(".crop-result").length, 6);
+  await click(document.querySelector('[aria-label="Select land"]'));
+  await input(document.querySelector('[aria-label="Search countries, regions and locations"]'), "  india jalgaon ");
+  assert.equal(document.querySelectorAll(".picker-options button").length, 1, "sample search matches multiple words in any order");
+  await click(document.querySelector(".picker-options button"));
+  const beforeWater = document.querySelector('[aria-label="Water regime"]').value;
+  await input(document.querySelector('[aria-label="Water regime"]'), "irrigated");
+  await click(document.querySelector('[aria-label="Undo"]'));
+  assert.equal(document.querySelector('[aria-label="Water regime"]').value, beforeWater);
+  await click(document.querySelector('[aria-label="Redo"]'));
+  assert.equal(document.querySelector('[aria-label="Water regime"]').value, "irrigated");
+  await click(document.querySelector('[aria-label="Undo"]'));
+  await input(document.querySelector('[aria-label="Growing season"]'), "Rabi");
+  assert.equal(document.querySelector('[aria-label="Redo"]').disabled, true, "new changes discard redo branch");
   await click(button("Find land"));
   await click(document.querySelector(".location-picker-trigger"));
   await click(document.querySelector(".picker-world"));
@@ -204,7 +237,7 @@ function label(name) {
   );
   await act(async () => app.unmount());
   console.log(
-    "PASS: below-map detail placement, two-candidate comparison dialog, economic comparison, project creation/persistence, simulated invitations, evidence creation, crop discovery, time context and complete onboarding, searchable location picker and global discovery. Map rendering itself is covered by manual browser review.",
+    "PASS: undo/redo for exploration and persisted project edits, redo branch reset, detail comparison picker, token-based sample search, below-map detail placement, two-candidate comparison dialog, economic comparison, project creation/persistence, simulated invitations, evidence creation, crop discovery, time context and complete onboarding, searchable location picker and global discovery. Map rendering itself is covered by manual browser review.",
   );
   process.exit(0);
 })().catch((e) => {

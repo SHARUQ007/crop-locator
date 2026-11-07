@@ -11,6 +11,7 @@ import {
   X,
   LoaderCircle,
 } from "lucide-react";
+import { matchesSearch } from "../lib/search";
 import { db } from "../lib/model";
 import { countries, geographyLabel } from "../lib/geography";
 
@@ -21,6 +22,7 @@ export default function LocationPicker({
   locating = false,
   method = "",
   compact = false,
+  sampleOnly = false,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -28,6 +30,7 @@ export default function LocationPicker({
   locating?: boolean;
   method?: string;
   compact?: boolean;
+  sampleOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false),
     [query, setQuery] = useState("");
@@ -55,12 +58,10 @@ export default function LocationPicker({
     setQuery("");
   };
   const regionMatches = [...new Set(db.locations.map((s) => s.region))].filter(
-    (r) => r.toLowerCase().includes(query.toLowerCase()),
+    (r) => matchesSearch(r, query),
   );
   const matches = db.locations.filter((s) =>
-    (s.name + " " + s.region + " " + s.country + " " + s.aezId)
-      .toLowerCase()
-      .includes(query.toLowerCase()),
+    matchesSearch(s.name + " " + s.region + " " + s.country + " " + s.aezId, query),
   );
   return (
     <div className={"location-picker " + (compact ? "compact" : "")} ref={root}>
@@ -73,7 +74,7 @@ export default function LocationPicker({
         }}
         aria-expanded={open}
         aria-haspopup="dialog"
-        aria-label={`Search region: ${geographyLabel(value)}`}
+        aria-label={sampleOnly ? "Select land" : `Search region: ${geographyLabel(value)}`}
       >
         <span className="picker-leading">
           {value === "Worldwide" ? <Globe2 size={18} /> : <MapPin size={18} />}
@@ -93,7 +94,7 @@ export default function LocationPicker({
           aria-label="Choose search location"
         >
           <div className="location-picker-heading">
-            <strong>Where would you like to explore?</strong>
+            <strong>{sampleOnly ? "Find your sample location" : "Where would you like to explore?"}</strong>
             <button
               type="button"
               aria-label="Close location picker"
@@ -121,7 +122,7 @@ export default function LocationPicker({
               </button>
             )}
           </div>
-          {!query && (
+          {!query && !sampleOnly && (
             <>
               <button
                 type="button"
@@ -168,10 +169,10 @@ export default function LocationPicker({
           )}
           <div className="picker-options">
             <div className="eyebrow">
-              {query ? "MATCHING COUNTRIES" : "COUNTRIES WITH SAMPLE COVERAGE"}
+              {sampleOnly ? `${matches.length} SAMPLE LOCATIONS` : query ? "MATCHING COUNTRIES" : "COUNTRIES WITH SAMPLE COVERAGE"}
             </div>
-            {countries
-              .filter((c) => c.toLowerCase().includes(query.toLowerCase()))
+            {(sampleOnly ? [] : countries)
+              .filter((c) => matchesSearch(c, query))
               .map((c) => (
                 <button
                   type="button"
@@ -190,7 +191,7 @@ export default function LocationPicker({
                   {value === c && <Check size={15} />}
                 </button>
               ))}
-            {query && regionMatches.length > 0 && (
+            {query && !sampleOnly && regionMatches.length > 0 && (
               <>
                 <div className="eyebrow">REGIONS</div>
                 {regionMatches.slice(0, 8).map((r) => (
@@ -214,10 +215,10 @@ export default function LocationPicker({
                 ))}
               </>
             )}
-            {query && matches.length > 0 && (
+            {(query || sampleOnly) && matches.length > 0 && (
               <>
                 <div className="eyebrow">SAMPLE LOCATIONS</div>
-                {matches.slice(0, 10).map((s) => (
+                {matches.map((s) => (
                   <button
                     type="button"
                     key={s.id}
@@ -238,9 +239,7 @@ export default function LocationPicker({
             )}
             {query &&
               !matches.length &&
-              !countries.some((c) =>
-                c.toLowerCase().includes(query.toLowerCase()),
-              ) && (
+              (sampleOnly || !countries.some((c) => matchesSearch(c, query))) && (
                 <div className="picker-no-results">
                   No sample coverage found. Search another country or choose
                   Worldwide.

@@ -1,6 +1,8 @@
 "use client";
 import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
 import {
+  Undo2,
+  Redo2,
   ArrowRight,
   ArrowUpRight,
   ArrowLeft,
@@ -55,6 +57,8 @@ import {
   ChevronUp,
   LoaderCircle,
 } from "lucide-react";
+import { useUndoRedo } from "../hooks/use-undo-redo";
+import { matchesSearch } from "../lib/search";
 import ExplorerMap from "../components/explorer-map";
 const LocationDetail = lazy(() => import("../components/location-detail"));
 import Onboarding from "../components/onboarding";
@@ -252,7 +256,7 @@ export default function Home() {
               evidence.some(
                 (e) => e.locationId === s.id && e.cropId === context.crop,
               )) &&
-            s.name.toLowerCase().includes(listSearch.toLowerCase())
+            matchesSearch(`${s.name} ${s.region} ${s.country} ${s.aezId}`, listSearch)
           );
         })
         .sort((a, b) =>
@@ -278,6 +282,18 @@ export default function Home() {
       benchmark,
     ],
   );
+  const history = useUndoRedo(
+    { context, mode, land, selected, selectedCell, comparison, minFit, lowWater, verified, sort, layer, projects, members, evidence, activeProject },
+    (state) => {
+      setContext(state.context); setMode(state.mode); setLand(state.land);
+      setSelected(state.selected); setSelectedCell(state.selectedCell);
+      setComparison(state.comparison); setMinFit(state.minFit);
+      setLowWater(state.lowWater); setVerified(state.verified);
+      setSort(state.sort); setLayer(state.layer); setProjects(state.projects);
+      setMembers(state.members); setEvidence(state.evidence); setActiveProject(state.activeProject);
+      localStorage.setItem("cl-location-choice-v1", state.context.region);
+    }, ready,
+  );
   const rankedCrops = useMemo(
     () =>
       db.crops
@@ -290,7 +306,7 @@ export default function Home() {
               evidence.some(
                 (e) => e.locationId === land && e.cropId === c.crop.id,
               )) &&
-            c.crop.name.toLowerCase().includes(listSearch.toLowerCase()),
+            matchesSearch(`${c.crop.name} ${c.crop.category}`, listSearch),
         )
         .sort((a, b) =>
           sort === "water"
@@ -1000,6 +1016,10 @@ export default function Home() {
             )}
           </div>
           <div className="topbar-actions">
+            <div className="history-controls" role="group" aria-label="Change history">
+              <button className="icon-button" aria-label="Undo" title="Undo (⌘/Ctrl Z)" disabled={!history.canUndo} onClick={history.undo}><Undo2 size={17} /></button>
+              <button className="icon-button" aria-label="Redo" title="Redo (⌘/Ctrl Shift Z)" disabled={!history.canRedo} onClick={history.redo}><Redo2 size={17} /></button>
+            </div>
             <button
               className="command-button"
               title="Search workspace"
@@ -1160,30 +1180,16 @@ export default function Home() {
                     </div>
                   </>
                 ) : (
-                  <label className="query-field region-field">
+                  <div className="query-field region-field">
                     <span>YOUR LAND / SAMPLE LOCATION</span>
-                    <div>
-                      <MapPin size={17} />
-                      <select
-                        aria-label="Select land"
-                        value={land}
-                        onChange={(e) => {
-                          setLand(e.target.value);
-                          setSelected(e.target.value);
-                          setContext({
-                            ...context,
-                            region: getSite(e.target.value).region,
-                          });
-                        }}
-                      >
-                        {db.locations.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name}, {s.region}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </label>
+                    <LocationPicker value={"site:" + land} sampleOnly onLocate={() => locate()}
+                      onChange={(value) => {
+                        const id = value.replace("site:", "");
+                        setLand(id); setSelected(id); setSelectedCell(null);
+                        setContext({ ...context, region: getSite(id).region });
+                        setZoomTo((n) => n + 1);
+                      }} />
+                  </div>
                 )}
                 <label className="query-field season-field">
                   <span>GROWING SEASON</span>
@@ -1990,7 +1996,15 @@ export default function Home() {
                       setSelectedCell(null);
                     }}
                     onSave={openSave}
-                    onCompare={() => toggleCompare(chosenCandidate)}
+                    onCompare={() => {
+                      if (!isCompared(chosenCandidate.siteId, chosenCandidate.cropId)) {
+                        setComparison((items) => [...items.slice(0, 2), chosenCandidate]);
+                      }
+                      setModal("compare");
+                    }}
+                    cropOpportunities={mode === "crops"}
+                    onCompareCrop={(cropId) => toggleCompare({ siteId: selected, cropId, context: { ...context, crop: cropId } })}
+                    comparedCrops={comparison.filter((c) => c.siteId === selected).map((c) => c.cropId)}
                     onZoom={() => setZoomTo((n) => n + 1)}
                     onEvidence={openEvidence}
                     onScenario={openScenario}
@@ -2064,7 +2078,7 @@ export default function Home() {
                       (p) =>
                         (projectFilter === "All projects" ||
                           p.status === projectFilter) &&
-                        p.name.toLowerCase().includes(search.toLowerCase()),
+                        matchesSearch(`${p.name} ${p.description} ${p.region} ${p.status}`, search),
                     )
                     .map((p, i) => (
                       <button
@@ -2672,9 +2686,7 @@ export default function Home() {
                   (c) =>
                     (cropCategory === "All crops" ||
                       c.category === cropCategory) &&
-                    (c.name + " " + c.scientificName)
-                      .toLowerCase()
-                      .includes(search.toLowerCase()),
+                    matchesSearch(`${c.name} ${c.scientificName} ${c.category}`, search),
                 )
                 .map((c) => (
                   <article
@@ -2817,9 +2829,7 @@ export default function Home() {
                 <tbody>
                   {evidence
                     .filter((e) =>
-                      (e.name + " " + e.note)
-                        .toLowerCase()
-                        .includes(search.toLowerCase()),
+                      matchesSearch(`${e.name} ${e.note} ${e.type} ${getSite(e.locationId).name} ${getCrop(e.cropId).name}`, search),
                     )
                     .map((e) => (
                       <tr key={e.id}>
@@ -2969,9 +2979,7 @@ export default function Home() {
                 <tbody>
                   {members
                     .filter((m) =>
-                      (m.name + " " + m.email)
-                        .toLowerCase()
-                        .includes(search.toLowerCase()),
+                      matchesSearch(`${m.name} ${m.email} ${m.role} ${m.scope} ${m.status}`, search),
                     )
                     .map((m) => (
                       <tr key={m.id}>
@@ -3317,7 +3325,7 @@ export default function Home() {
       )}
       {modal === "compare" && (
         <Modal
-          title="A little perspective changes everything."
+          title="Compare crops and locations"
           subtitle="Compare candidates under the same season, water and climate assumptions. All values are synthetic."
           onClose={() => setModal(null)}
           wide
@@ -3348,6 +3356,25 @@ export default function Home() {
                 </option>
               ))}
             </select>
+          </div>
+          <div className="comparison-picker">
+            <label>Add a candidate
+              <select aria-label="Add comparison candidate" value="" disabled={comparison.length >= 3}
+                onChange={(e) => {
+                  const [siteId, cropId] = e.target.value.split(":");
+                  toggleCompare({ siteId, cropId, context: { ...context, crop: cropId } });
+                }}>
+                <option value="">Choose a location and crop…</option>
+                {(mode === "crops" ? [getSite(land)] : db.locations).map((site) => (
+                  <optgroup key={site.id} label={`${site.name}, ${site.country}`}>
+                    {db.crops.filter((crop) => !isCompared(site.id, crop.id)).map((crop) => (
+                      <option key={crop.id} value={`${site.id}:${crop.id}`}>{site.name} · {crop.name}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
+            <span>{comparison.length}/3 selected · {comparison.length < 2 ? "Add a second candidate to compare side by side." : "Compare under the current growing context."}</span>
           </div>
           <div className="segmented compare-tabs">
             {["Fit & climate", "Commercial outlook", "Evidence"].map((t) => (
@@ -3382,7 +3409,7 @@ export default function Home() {
                       title="Remove candidate"
                       onClick={() => {
                         toggleCompare(c);
-                        if (comparison.length <= 2) setModal(null);
+                        
                       }}
                     >
                       <X size={14} />
@@ -3877,9 +3904,7 @@ export default function Home() {
               })),
             ]
               .filter((a) =>
-                (a.label + " " + a.sub)
-                  .toLowerCase()
-                  .includes(commandQuery.toLowerCase()),
+                matchesSearch(a.label + " " + a.sub, commandQuery),
               )
               .map((a) => (
                 <button key={a.label} onClick={a.action}>

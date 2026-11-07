@@ -232,7 +232,7 @@ export default function ExplorerMap({
     };
   }, [ready, context, sites, selected, layer, zoom]);
   useEffect(() => {
-    if (!ready || !map.current || !sites.length) return;
+    if (!ready || !map.current || !sites.length || selected) return;
     import("leaflet").then((L) => {
       map.current?.fitBounds(
         L.latLngBounds(sites.map((s) => s.center as [number, number])),
@@ -247,10 +247,7 @@ export default function ExplorerMap({
   useEffect(() => {
     if (!ready || !selected || !map.current) return;
     const s = db.locations.find((s) => s.id === selected);
-    if (s && map.current.getZoom() < 6)
-      map.current.flyTo(s.center as [number, number], 6, { duration: 0.7 });
-    else if (s)
-      map.current.panTo(s.center as [number, number], { animate: true });
+    if (s) map.current.flyTo(s.center as [number, number], 12, { duration: 0.7 });
   }, [selected, ready]);
   useEffect(() => {
     if (!ready || !selected || !map.current || !zoomTo) return;

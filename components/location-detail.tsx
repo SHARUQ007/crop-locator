@@ -60,8 +60,14 @@ export default function LocationDetail({
   cellObservation,
   initialAssumptions,
   onAnalogues,
+  cropOpportunities = false,
+  onCompareCrop,
+  comparedCrops = [],
 }: {
   onAnalogues: () => void;
+  cropOpportunities?: boolean;
+  onCompareCrop?: (cropId: string) => void;
+  comparedCrops?: string[];
   cellObservation?: Record<string, any>;
   initialAssumptions?: { price: number; cost: number; logistics: number };
   site: Site;
@@ -212,6 +218,27 @@ export default function LocationDetail({
         <span>·</span>
         {db.periods.find((p) => p.id === context.period)?.range}
       </div>
+      {cropOpportunities && (
+        <section className="crop-opportunities" aria-label="Crop opportunities">
+          <div className="opportunity-heading"><div><h3>Crop opportunities</h3><p>All {db.crops.length} screened crops for {site.name}. Select a crop to inspect its details.</p></div><span>Synthetic screening</span></div>
+          <div className="opportunity-grid">
+            {db.crops.map((candidate) => ({ crop: candidate, record: getRecord(site.id, context, candidate.id) }))
+              .sort((a, b) => b.record.suitability - a.record.suitability)
+              .map(({ crop: candidate, record }) => (
+                <article key={candidate.id} className={"opportunity-card " + (context.crop === candidate.id ? "active" : "")}>
+                  <button className="opportunity-select" onClick={() => onContext({ ...context, crop: candidate.id })} aria-pressed={context.crop === candidate.id}>
+                    <strong>{candidate.name}<span>{Math.round(record.suitability)}<small>/100</small></span></strong>
+                    <span>{fitLabel(record.suitability)} fit</span>
+                    <small>Yield range {record.yieldRange.join("–")} t/ha</small>
+                  </button>
+                  <button className="text-button" onClick={() => onCompareCrop?.(candidate.id)} aria-pressed={comparedCrops.includes(candidate.id)}>
+                    {comparedCrops.includes(candidate.id) ? <Check size={14} /> : <Plus size={14} />} {comparedCrops.includes(candidate.id) ? "Added to comparison" : "Compare crop"}
+                  </button>
+                </article>
+              ))}
+          </div>
+        </section>
+      )}
       <div className="detail-tabs">
         {[
           "Overview",
