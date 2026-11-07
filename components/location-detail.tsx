@@ -228,7 +228,7 @@ export default function LocationDetail({
                 <article key={candidate.id} className={"opportunity-card " + (context.crop === candidate.id ? "active" : "")}>
                   <button className="opportunity-select" onClick={() => onContext({ ...context, crop: candidate.id })} aria-pressed={context.crop === candidate.id}>
                     <strong>{candidate.name}<span>{Math.round(record.suitability)}<small>/100</small></span></strong>
-                    <span>{fitLabel(record.suitability)} fit</span>
+                    <span>{fitLabel(record.suitability)}</span>
                     <small>Yield range {record.yieldRange.join("–")} t/ha</small>
                   </button>
                   <button className="text-button" onClick={() => onCompareCrop?.(candidate.id)} aria-pressed={comparedCrops.includes(candidate.id)}>

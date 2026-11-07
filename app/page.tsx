@@ -3409,7 +3409,7 @@ export default function Home() {
                       title="Remove candidate"
                       onClick={() => {
                         toggleCompare(c);
-                        
+
                       }}
                     >
                       <X size={14} />
