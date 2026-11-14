@@ -1,0 +1,18 @@
+import {build} from 'vite';
+import react from '@vitejs/plugin-react';
+import {mkdir,readFile,writeFile} from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const staging=path.join(project,'outputs/public-entry');
+const output=path.join(project,'outputs/public-site');
+const base='/crop-locator/';
+await mkdir(staging,{recursive:true});
+const layout=await readFile(path.join(project,'app/layout.tsx'),'utf8');
+const styles=[...layout.matchAll(/import "\.\/(.*\.css)";/g)].map(match=>`import '../../app/${match[1]}';`).join('\n');
+await writeFile(path.join(staging,'main.tsx'),`import React from 'react';\nimport {createRoot} from 'react-dom/client';\nimport App from '../../app/page';\n${styles}\ncreateRoot(document.getElementById('root')!).render(<App/>);\n`);
+await writeFile(path.join(staging,'index.html'),`<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="CropLocator: a map-first crop, land and market intelligence prototype with illustrative data."><title>CropLocator — A better place to grow</title><link rel="icon" href="${base}favicon.svg"></head><body><div id="root"></div><script type="module" src="./main.tsx"></script></body></html>`);
+await build({configFile:false,root:staging,base,publicDir:path.join(project,'public'),cacheDir:path.join(project,'node_modules/.vite-public'),plugins:[{name:'public-data-paths',enforce:'pre',transform(code,id){if(id.split('?')[0]!==path.join(project,'app/page.tsx'))return;return code.replaceAll('`/data/','`${import.meta.env.BASE_URL}data/').replaceAll('"/data/','import.meta.env.BASE_URL + "data/');}},react()],resolve:{alias:{'@':project}},build:{outDir:output,emptyOutDir:true,sourcemap:false}});
+await writeFile(path.join(output,'.nojekyll'),'');
+await writeFile(path.join(output,'README.md'),'# CropLocator public deployment\n\nThis repository contains generated website assets and illustrative demo data for GitHub Pages. The authored application source is maintained separately. Workspace changes and evidence remain in each visitor’s browser storage.\n');
+console.log(`Public build ready: ${output}`);
